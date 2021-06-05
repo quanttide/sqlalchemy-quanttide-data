@@ -51,156 +51,6 @@ class SqlUtil(base_sql_util.SqlUtil):
         if connect_now:
             self.try_connect()
 
-    def connect(self):
-        self.connection = self.engine.connect()
-
-    def close(self, try_close=True):
-        if try_close:
-            try:
-                self.connection.close()
-            except Exception as e:
-                if self.log:
-                    self.logger.error('{}: {}  (in try_close)'.format(str(type(e))[8:-2], e), exc_info=True)
-            try:
-                self.engine.dispose()
-            except Exception as e:
-                if self.log:
-                    self.logger.error('{}: {}  (in try_close)'.format(str(type(e))[8:-2], e), exc_info=True)
-        else:
-            self.connection.close()
-            self.engine.dispose()
-
-    @property
-    def autocommit(self):
-        return self._autocommit
-
-    @autocommit.setter
-    def autocommit(self, value):
-        if hasattr(self, 'connection') and value != self._autocommit:
-            self.engine.update_execution_options(autocommit=value)
-            self.connection = self.connection.execution_options(autocommit=value)
-        self._autocommit = value
-
-    @contextlib.contextmanager
-    def transaction(self):
-        transaction = self.begin()
-        try:
-            yield transaction
-            transaction.commit()
-        except Exception:
-            transaction.rollback()
-
-    def begin(self):
-        self.temp_autocommit = self._autocommit
-        self.autocommit = False
-        self.set_connection()
-        transaction = self.connection.begin()
-        self._transactions.append(transaction)
-        return transaction
-
-    def commit(self, transaction=None):
-        if transaction is not None:
-            transaction.commit()
-        elif self._transactions:
-            self._transactions[-1].commit()
-        if self.temp_autocommit is not None:
-            self.autocommit = self.temp_autocommit
-            self.temp_autocommit = None
-
-    def rollback(self, transaction=None):
-        if transaction is not None:
-            transaction.rollback()
-        elif self._transactions:
-            self._transactions[-1].rollback()
-        if self.temp_autocommit is not None:
-            self.autocommit = self.temp_autocommit
-            self.temp_autocommit = None
-
-    def format(self, query, args, raise_error=True):
-        try:
-            if args is None:
-                return query
-            return query % args if '%' in query else query.format(args)
-        except Exception as e:
-            if raise_error:
-                raise e
-            return
-
-    def execute(self, query, values=None, fetchall=True, dictionary=None, origin_result=None, dataset=None, many=False,
-                commit=True):
-        if dictionary is None:
-            dictionary = self.dictionary
-        if origin_result is None:
-            origin_result = self.origin_result
-        if dataset is None:
-            dataset = self.dataset
-        self.set_connection()
-        if values is None:
-            cursor = self.connection.execute(sqlalchemy.sql.expression.text(query))
-        elif not many:
-            if isinstance(values, dict):
-                cursor = self.connection.execute(sqlalchemy.sql.expression.text(query), **values)
-            else:
-                cursor = self.connection.execute(sqlalchemy.sql.expression.text(query % values))
-        else:
-            cursor = self.connection.execute(sqlalchemy.sql.expression.text(query), *values)
-        if origin_result and fetchall and not dictionary:
-            return list(cursor)
-        result = RecordCollection((Record(cursor.keys(), row) for row in cursor) if cursor.returns_rows else iter(()))
-        if commit and not self._autocommit:
-            self.commit()
-        if not fetchall:
-            return 1 if not many else len(values)
-        elif dictionary:
-            return result.all(as_dict=True)
-        elif dataset:
-            return result.dataset
-        return result
-
-    def try_execute(self, query, values=None, args=None, fetchall=True, dictionary=None, origin_result=None,
-                    dataset=None, many=False, commit=True, try_times_connect=3, time_sleep_connect=3,
-                    raise_error=False):
-        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
-        # values可以为None
-        self.set_connection()
-        try_count_connect = 0
-        while True:
-            try:
-                return self.execute(query, values, fetchall, dictionary, origin_result, dataset, many, commit)
-            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
-                try_count_connect += 1
-                if try_times_connect and try_count_connect >= try_times_connect:
-                    if self.log:
-                        self.logger.error('{}(max retry({})): {}  args: {}  {}'.format(
-                            str(type(e))[8:-2], try_count_connect, e, args, self._query_log_text(query, values)),
-                            exc_info=True)
-                    if raise_error:
-                        raise e
-                    break
-                if self.log:
-                    self.logger.error('{}(retry({}), sleep {}): {}  args: {}  {}'.format(
-                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e, args,
-                        self._query_log_text(query, values)), exc_info=True)
-                if time_sleep_connect:
-                    time.sleep(time_sleep_connect)
-            except Exception as e:
-                self.rollback()
-                if self.log:
-                    self.logger.error('{}: {}  args: {}  {}'.format(
-                        str(type(e))[8:-2], e, args, self._query_log_text(query, values)), exc_info=True)
-                if raise_error:
-                    raise e
-                break
-        if fetchall:
-            return ()
-        return 0
-
-    @staticmethod
-    def _auto_format_query(query, arg, escape_auto_format, escape_punc="`"):
-        return query.format('({})'.format(','.join(('{1}{0}{1}'.format(
-            key, escape_punc) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-            arg, dict) else '', ','.join(('%s',) * len(arg)))  # postgresql不使用``而使用""
-
     def query(self, query, args=None, fetchall=True, dictionary=None, origin_result=None, dataset=None, many=True,
               commit=True, auto_format=False, escape_auto_format=False, escape_punc="`", empty_string_to_none=True,
               keep_args_as_dict=False, try_times_connect=3, time_sleep_connect=3, raise_error=False):
@@ -295,6 +145,156 @@ class SqlUtil(base_sql_util.SqlUtil):
             return ()
         self.commit(transaction)
         return result
+
+    def close(self, try_close=True):
+        if try_close:
+            try:
+                self.connection.close()
+            except Exception as e:
+                if self.log:
+                    self.logger.error('{}: {}  (in try_close)'.format(str(type(e))[8:-2], e), exc_info=True)
+            try:
+                self.engine.dispose()
+            except Exception as e:
+                if self.log:
+                    self.logger.error('{}: {}  (in try_close)'.format(str(type(e))[8:-2], e), exc_info=True)
+        else:
+            self.connection.close()
+            self.engine.dispose()
+
+    @property
+    def autocommit(self):
+        return self._autocommit
+
+    @autocommit.setter
+    def autocommit(self, value):
+        if hasattr(self, 'connection') and value != self._autocommit:
+            self.engine.update_execution_options(autocommit=value)
+            self.connection = self.connection.execution_options(autocommit=value)
+        self._autocommit = value
+
+    @contextlib.contextmanager
+    def transaction(self):
+        transaction = self.begin()
+        try:
+            yield transaction
+            transaction.commit()
+        except Exception:
+            transaction.rollback()
+
+    def begin(self):
+        self.temp_autocommit = self._autocommit
+        self.autocommit = False
+        self.set_connection()
+        transaction = self.connection.begin()
+        self._transactions.append(transaction)
+        return transaction
+
+    def commit(self, transaction=None):
+        if transaction is not None:
+            transaction.commit()
+        elif self._transactions:
+            self._transactions[-1].commit()
+        if self.temp_autocommit is not None:
+            self.autocommit = self.temp_autocommit
+            self.temp_autocommit = None
+
+    def rollback(self, transaction=None):
+        if transaction is not None:
+            transaction.rollback()
+        elif self._transactions:
+            self._transactions[-1].rollback()
+        if self.temp_autocommit is not None:
+            self.autocommit = self.temp_autocommit
+            self.temp_autocommit = None
+
+    def connect(self):
+        self.connection = self.engine.connect()
+
+    def try_execute(self, query, values=None, args=None, fetchall=True, dictionary=None, origin_result=None,
+                    dataset=None, many=False, commit=True, try_times_connect=3, time_sleep_connect=3,
+                    raise_error=False):
+        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
+        # values可以为None
+        self.set_connection()
+        try_count_connect = 0
+        while True:
+            try:
+                return self.execute(query, values, fetchall, dictionary, origin_result, dataset, many, commit)
+            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
+                try_count_connect += 1
+                if try_times_connect and try_count_connect >= try_times_connect:
+                    if self.log:
+                        self.logger.error('{}(max retry({})): {}  args: {}  {}'.format(
+                            str(type(e))[8:-2], try_count_connect, e, args, self._query_log_text(query, values)),
+                            exc_info=True)
+                    if raise_error:
+                        raise e
+                    break
+                if self.log:
+                    self.logger.error('{}(retry({}), sleep {}): {}  args: {}  {}'.format(
+                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e, args,
+                        self._query_log_text(query, values)), exc_info=True)
+                if time_sleep_connect:
+                    time.sleep(time_sleep_connect)
+            except Exception as e:
+                self.rollback()
+                if self.log:
+                    self.logger.error('{}: {}  args: {}  {}'.format(
+                        str(type(e))[8:-2], e, args, self._query_log_text(query, values)), exc_info=True)
+                if raise_error:
+                    raise e
+                break
+        if fetchall:
+            return ()
+        return 0
+
+    def execute(self, query, values=None, fetchall=True, dictionary=None, origin_result=None, dataset=None, many=False,
+                commit=True):
+        if dictionary is None:
+            dictionary = self.dictionary
+        if origin_result is None:
+            origin_result = self.origin_result
+        if dataset is None:
+            dataset = self.dataset
+        self.set_connection()
+        if values is None:
+            cursor = self.connection.execute(sqlalchemy.sql.expression.text(query))
+        elif not many:
+            if isinstance(values, dict):
+                cursor = self.connection.execute(sqlalchemy.sql.expression.text(query), **values)
+            else:
+                cursor = self.connection.execute(sqlalchemy.sql.expression.text(query % values))
+        else:
+            cursor = self.connection.execute(sqlalchemy.sql.expression.text(query), *values)
+        if origin_result and fetchall and not dictionary:
+            return list(cursor)
+        result = RecordCollection((Record(cursor.keys(), row) for row in cursor) if cursor.returns_rows else iter(()))
+        if commit and not self._autocommit:
+            self.commit()
+        if not fetchall:
+            return 1 if not many else len(values)
+        elif dictionary:
+            return result.all(as_dict=True)
+        elif dataset:
+            return result.dataset
+        return result
+
+    def format(self, query, args, raise_error=True):
+        try:
+            if args is None:
+                return query
+            return query % args if '%' in query else query.format(args)
+        except Exception as e:
+            if raise_error:
+                raise e
+            return
+
+    @staticmethod
+    def _auto_format_query(query, arg, escape_auto_format, escape_punc="`"):
+        return query.format('({})'.format(','.join(('{1}{0}{1}'.format(
+            key, escape_punc) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
+            arg, dict) else '', ','.join(('%s',) * len(arg)))  # postgresql不使用``而使用""
 
     def query_file(self, path, args=None, fetchall=True, dictionary=None, dataset=None, builtin_list=None, many=True,
                    commit=True, auto_format=False, escape_auto_format=False, escape_punc="`", empty_string_to_none=True,

@@ -10,10 +10,21 @@ class SqlUtil(base_sql_util.SqlUtil):
         self.lib = cx_Oracle
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, dictionary, log)
 
-    def connect(self):
-        self.connection = self.lib.connect(user=self.user, password=self.password, dsn='{}:{}/{}'.format(
-            self.host, self.port, self.database), encoding=self.charset)
-        self.connection.autocommit = self._autocommit
+    def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
+              escape_auto_format=False, empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3,
+              time_sleep_connect=3, raise_error=False):
+        # oracle如果用双引号escape字段则区分大小写，故默认不escape
+        return super().query(query, args, fetchall, dictionary, many, commit, auto_format, escape_auto_format,
+                             empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
+                             raise_error)
+
+    def save_data(self, data_list=None, table=None, statement='INSERT INTO', extra=None, many=False, auto_format=True,
+                  key=None, escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False,
+                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
+        # oracle无replace语句；insert必须带into
+        return super().save_data(data_list, table, statement, extra, many, auto_format, key, escape_auto_format,
+                                 empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
+                                 raise_error)
 
     @property
     def autocommit(self):
@@ -25,27 +36,10 @@ class SqlUtil(base_sql_util.SqlUtil):
             self.connection.autocommit = value
         self._autocommit = value
 
-    def format(self, query, args, raise_error=True):
-        # cx_Oracle.Connection没有literal和escape，暂不借鉴mysql实现
-        try:
-            if args is None:
-                return query
-            return query % args if '%' in query else query.format(args)
-        except Exception as e:
-            if raise_error:
-                raise e
-            return
-
-    def _query_log_text(self, query, values):
-        return 'query: {}'.format(self.try_format(query, values))
-
-    def _before_query_and_get_cursor(self, fetchall, dictionary):
-        if fetchall and dictionary != self.dictionary:
-            if hasattr(self, 'connection'):
-                self.connection.as_dict = dictionary
-            self.dictionary = dictionary
-        self.set_connection()
-        return self.connection.cursor()
+    def connect(self):
+        self.connection = self.lib.connect(user=self.user, password=self.password, dsn='{}:{}/{}'.format(
+            self.host, self.port, self.database), encoding=self.charset)
+        self.connection.autocommit = self._autocommit
 
     def execute(self, query, values=None, fetchall=True, dictionary=None, many=False, commit=True, cursor=None):
         ori_cursor = cursor
@@ -62,27 +56,33 @@ class SqlUtil(base_sql_util.SqlUtil):
             cursor.close()
         return result
 
+    def format(self, query, args, raise_error=True):
+        # cx_Oracle.Connection没有literal和escape，暂不借鉴mysql实现
+        try:
+            if args is None:
+                return query
+            return query % args if '%' in query else query.format(args)
+        except Exception as e:
+            if raise_error:
+                raise e
+            return
     @staticmethod
     def _auto_format_query(query, arg, escape_auto_format):
         return query.format('({})'.format(','.join(('"{}"'.format(key) for key in arg) if escape_auto_format else
                                                    map(str, arg))) if isinstance(arg, dict) else '',
                             ','.join(':{}'.format(i) for i in range(1, len(arg) + 1)))  # oracle不使用``而使用""
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
-              escape_auto_format=False, empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3,
-              time_sleep_connect=3, raise_error=False):
-        # oracle如果用双引号escape字段则区分大小写，故默认不escape
-        return super().query(query, args, fetchall, dictionary, many, commit, auto_format, escape_auto_format,
-                             empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                             raise_error)
+    def _before_query_and_get_cursor(self, fetchall, dictionary):
+        if fetchall and dictionary != self.dictionary:
+            if hasattr(self, 'connection'):
+                self.connection.as_dict = dictionary
+            self.dictionary = dictionary
+        self.set_connection()
+        return self.connection.cursor()
 
-    def save_data(self, data_list=None, table=None, statement='INSERT INTO', extra=None, many=False, auto_format=True,
-                  key=None, escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False,
-                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # oracle无replace语句；insert必须带into
-        return super().save_data(data_list, table, statement, extra, many, auto_format, key, escape_auto_format,
-                                 empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                                 raise_error)
+    def _query_log_text(self, query, values):
+        return 'query: {}'.format(self.try_format(query, values))
+
 
     def call_proc(self, name, args=(), kwargs=None, fetchall=True, dictionary=None, commit=True,
                   empty_string_to_none=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):

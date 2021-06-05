@@ -11,10 +11,21 @@ class SqlUtil(base_sql_util.SqlUtil):
         self.lib = psycopg2
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, dictionary, log)
 
-    def connect(self):
-        self.connection = self.lib.connect(host=self.host, port=self.port, user=self.user, password=self.password,
-                                           database=self.database)
-        self.connection.autocommit = self._autocommit
+    def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
+              escape_auto_format=False, empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3,
+              time_sleep_connect=3, raise_error=False):
+        # postgresql如果用双引号escape字段则区分大小写，故默认不escape
+        return super().query(query, args, fetchall, dictionary, many, commit, auto_format, escape_auto_format,
+                             empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
+                             raise_error)
+
+    def save_data(self, data_list=None, table=None, statement='INSERT INTO', extra=None, many=False, auto_format=True,
+                  key=None, escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False,
+                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
+        # postgresql无replace语句；insert必须带into
+        return super().save_data(data_list, table, statement, extra, many, auto_format, key, escape_auto_format,
+                                 empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
+                                 raise_error)
 
     @property
     def autocommit(self):
@@ -31,48 +42,10 @@ class SqlUtil(base_sql_util.SqlUtil):
         self.autocommit = False
         self.set_connection()
 
-    def ping(self):
-        # psycopg2.connection没有ping
-        pass
-
-    def format(self, query, args, raise_error=True, cursor=None):
-        # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
-        try:
-            if args is None:
-                return query
-            ori_cursor = cursor
-            if cursor is None:
-                cursor = self.connection.cursor()
-            if isinstance(args, dict):
-                new_args = dict((key, cursor.mogrify(item)) for key, item in args.items())
-                formatted_query = query % new_args if '%' in query else query.format(**new_args)
-            else:
-                new_args = tuple(map(cursor.mogrify, args))
-                formatted_query = query % new_args if '%' in query else query.format(*new_args)
-            if ori_cursor is None:
-                cursor.close()
-            return formatted_query
-        except Exception as e:
-            if raise_error:
-                raise e
-            return
-
-    def try_format(self, query, args, cursor=None):
-        try:
-            return self.format(query, args, True, cursor)
-        except Exception as e:
-            return '{}: {}: {}'.format(query, str(type(e))[8:-2], e)
-
-    def _query_log_text(self, query, values, cursor=None):
-        return 'formatted_query: {}'.format(self.try_format(query, values, cursor))
-
-    def _before_query_and_get_cursor(self, fetchall, dictionary):
-        if dictionary and fetchall:
-            cursor_class = self.lib.extras.DictCursor
-        else:
-            cursor_class = None
-        self.set_connection()
-        return self.connection.cursor(cursor_factory=cursor_class)
+    def connect(self):
+        self.connection = self.lib.connect(host=self.host, port=self.port, user=self.user, password=self.password,
+                                           database=self.database)
+        self.connection.autocommit = self._autocommit
 
     def try_execute(self, query, values=None, args=None, cursor=None, fetchall=True, dictionary=None, many=False,
                     commit=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
@@ -123,23 +96,50 @@ class SqlUtil(base_sql_util.SqlUtil):
             return ()
         return 0
 
+    def ping(self):
+        # psycopg2.connection没有ping
+        pass
+
+    def format(self, query, args, raise_error=True, cursor=None):
+        # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
+        try:
+            if args is None:
+                return query
+            ori_cursor = cursor
+            if cursor is None:
+                cursor = self.connection.cursor()
+            if isinstance(args, dict):
+                new_args = dict((key, cursor.mogrify(item)) for key, item in args.items())
+                formatted_query = query % new_args if '%' in query else query.format(**new_args)
+            else:
+                new_args = tuple(map(cursor.mogrify, args))
+                formatted_query = query % new_args if '%' in query else query.format(*new_args)
+            if ori_cursor is None:
+                cursor.close()
+            return formatted_query
+        except Exception as e:
+            if raise_error:
+                raise e
+            return
+
+    def try_format(self, query, args, cursor=None):
+        try:
+            return self.format(query, args, True, cursor)
+        except Exception as e:
+            return '{}: {}: {}'.format(query, str(type(e))[8:-2], e)
+
     @staticmethod
     def _auto_format_query(query, arg, escape_auto_format):
         return query.format('({})'.format(','.join(('"{}"'.format(key) for key in arg) if escape_auto_format else map(
             str, arg))) if isinstance(arg, dict) else '', ','.join(('%s',) * len(arg)))  # postgresql不使用``而使用""
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
-              escape_auto_format=False, empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3,
-              time_sleep_connect=3, raise_error=False):
-        # postgresql如果用双引号escape字段则区分大小写，故默认不escape
-        return super().query(query, args, fetchall, dictionary, many, commit, auto_format, escape_auto_format,
-                             empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                             raise_error)
+    def _before_query_and_get_cursor(self, fetchall, dictionary):
+        if dictionary and fetchall:
+            cursor_class = self.lib.extras.DictCursor
+        else:
+            cursor_class = None
+        self.set_connection()
+        return self.connection.cursor(cursor_factory=cursor_class)
 
-    def save_data(self, data_list=None, table=None, statement='INSERT INTO', extra=None, many=False, auto_format=True,
-                  key=None, escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False,
-                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # postgresql无replace语句；insert必须带into
-        return super().save_data(data_list, table, statement, extra, many, auto_format, key, escape_auto_format,
-                                 empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                                 raise_error)
+    def _query_log_text(self, query, values, cursor=None):
+        return 'formatted_query: {}'.format(self.try_format(query, values, cursor))

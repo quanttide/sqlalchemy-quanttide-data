@@ -26,226 +26,6 @@ class SqlUtil(object):
         if connect_now:
             self.try_connect()
 
-    def connect(self):
-        self.connection = self.lib.connect(host=self.host, port=self.port, user=self.user, password=self.password,
-                                           database=self.database, charset=self.charset, autocommit=self._autocommit)
-
-    def close(self, try_close=True):
-        if try_close:
-            try:
-                self.connection.close()
-            except self.lib.ProgrammingError:
-                # _mysql_exceptions.ProgrammingError: closing a closed connection
-                pass
-        else:
-            self.connection.close()
-
-    @property
-    def autocommit(self):
-        return self._autocommit
-
-    @autocommit.setter
-    def autocommit(self, value):
-        if hasattr(self, 'connection') and value != self._autocommit:
-            self.connection.autocommit(value)
-        self._autocommit = value
-
-    @contextlib.contextmanager
-    def transaction(self):
-        self.begin()
-        try:
-            yield self
-            self.commit()
-        except Exception:
-            self.rollback()
-
-    def begin(self):
-        self.temp_autocommit = self._autocommit
-        self.autocommit = False
-        self.set_connection()
-        self.connection.begin()
-
-    def commit(self):
-        self.connection.commit()
-        if self.temp_autocommit is not None:
-            self.autocommit = self.temp_autocommit
-            self.temp_autocommit = None
-
-    def rollback(self):
-        self.connection.rollback()
-        if self.temp_autocommit is not None:
-            self.autocommit = self.temp_autocommit
-            self.temp_autocommit = None
-
-    def try_connect(self, try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        try_count_connect = 0
-        while True:
-            try:
-                self.connect()
-                return
-            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
-                try_count_connect += 1
-                if try_times_connect and try_count_connect >= try_times_connect:
-                    if self.log:
-                        self.logger.error('{}(max retry({})): {}  (in try_connect)'.format(
-                            str(type(e))[8:-2], try_count_connect, e), exc_info=True)
-                    if raise_error:
-                        raise e
-                    return
-                if self.log:
-                    self.logger.error('{}(retry({}), sleep {}): {}  (in try_connect)'.format(
-                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e), exc_info=True)
-                if time_sleep_connect:
-                    time.sleep(time_sleep_connect)
-            except Exception as e:
-                if self.log:
-                    self.logger.error('{}: {}  (in try_connect)'.format(str(type(e))[8:-2], e), exc_info=True)
-                if raise_error:
-                    raise e
-                return
-
-    def set_connection(self):
-        if not hasattr(self, 'connection'):
-            self.try_connect()
-
-    def ping(self):
-        try:
-            self.connection.ping()
-        except (self.lib.InterfaceError, self.lib.OperationalError):
-            # MySQLdb._exceptions.OperationalError: (2013, 'Lost connection to MySQL server during query')
-            # MySQLdb._exceptions.OperationalError: (2006, 'MySQL server has gone away')
-            # _mysql_exceptions.InterfaceError: (0, '')
-            self.close()
-            self.try_connect()
-        except AttributeError:
-            # AttributeError: 'SqlUtil' object has no attribute 'connection'
-            # AttributeError: 'NoneType' object has no attribute 'ping'
-            self.try_connect()
-
-    def format(self, query, args, raise_error=True):
-        try:
-            if args is None:
-                return query
-            if isinstance(args, dict):
-                new_args = dict((key, self.connection.literal(item)) for key, item in args.items())
-                return query % new_args if '%' in query else query.format(**new_args)
-            new_args = tuple(map(self.connection.literal, args))
-            return query % new_args if '%' in query else query.format(*new_args)
-        except Exception as e:
-            if raise_error:
-                raise e
-            return
-
-    def try_format(self, query, args):
-        try:
-            return self.format(query, args, True)
-        except Exception as e:
-            return '{}: {}: {}'.format(query, str(type(e))[8:-2], e)
-
-    @staticmethod
-    def standardize_args(args, keep_args_list=False, empty_string_to_none=True, keep_args_as_dict=False):
-        if args is None:
-            return args
-        if not keep_args_list:
-            if isinstance(args, dict) and not keep_args_as_dict:
-                args = tuple(args.values())
-            if empty_string_to_none and hasattr(args, '__iter__'):
-                if isinstance(args, dict) and keep_args_as_dict:
-                    args = {key: value if value != '' else None for key, value in args.items()}
-                else:
-                    args = tuple(each if each != '' else None for each in args)
-        else:
-            if not isinstance(args, (
-                    dict, list, tuple)):  # 已知mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
-                args = list(args)
-            if isinstance(args, dict) or not isinstance(args[0], (dict, list, tuple)):
-                args = [args]
-            if isinstance(args[0], dict) and not keep_args_as_dict:
-                args = [tuple(each.values()) for each in args]
-            if empty_string_to_none:
-                if isinstance(args[0], dict) and keep_args_as_dict:
-                    args = [{key: value if value != '' else None for key, value in each.items()} for each in args]
-                else:
-                    args = [tuple(e if e != '' else None for e in each) for each in args]
-        return args
-
-    def _query_log_text(self, query, values):
-        return 'formatted_query: {}'.format(self.try_format(query, values))
-
-    def _before_query_and_get_cursor(self, fetchall, dictionary):
-        if dictionary and fetchall:
-            cursor_class = self.lib.cursors.DictCursor
-        else:
-            cursor_class = None
-        self.set_connection()
-        return self.connection.cursor(cursor_class)
-
-    def execute(self, query, values=None, fetchall=True, dictionary=None, many=False, commit=True, cursor=None):
-        ori_cursor = cursor
-        if cursor is None:
-            cursor = self._before_query_and_get_cursor(fetchall, self.dictionary if dictionary is None else dictionary)
-        if not many:
-            cursor.execute(query, values)
-        else:  # executemany: 一句插入多条记录，当语句超出1024000字符时拆分成多个语句；传单条记录需用列表包起来
-            cursor.executemany(query, values)
-        if commit and not self._autocommit:
-            self.commit()
-        result = cursor.fetchall() if fetchall else 1 if not many else len(values)
-        if ori_cursor is None:
-            cursor.close()
-        return result
-
-    def try_execute(self, query, values=None, args=None, cursor=None, fetchall=True, dictionary=None, many=False,
-                    commit=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
-        # values可以为None
-        ori_cursor = cursor
-        if cursor is None:
-            cursor = self._before_query_and_get_cursor(fetchall, self.dictionary if dictionary is None else dictionary)
-        try_count_connect = 0
-        while True:
-            try:
-                result = self.execute(query, values, fetchall, dictionary, many, commit, cursor)
-                if ori_cursor is None:
-                    cursor.close()
-                return result
-            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
-                try_count_connect += 1
-                if try_times_connect and try_count_connect >= try_times_connect:
-                    if self.log:
-                        self.logger.error('{}(max retry({})): {}  args: {}  {}'.format(
-                            str(type(e))[8:-2], try_count_connect, e, args, self._query_log_text(query, values)),
-                            exc_info=True)
-                    if raise_error:
-                        if ori_cursor is None:
-                            cursor.close()
-                        raise e
-                    break
-                if self.log:
-                    self.logger.error('{}(retry({}), sleep {}): {}  args: {}  {}'.format(
-                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e, args,
-                        self._query_log_text(query, values)), exc_info=True)
-                if time_sleep_connect:
-                    time.sleep(time_sleep_connect)
-            except Exception as e:
-                self.rollback()
-                if self.log:
-                    self.logger.error('{}: {}  args: {}  {}'.format(
-                        str(type(e))[8:-2], e, args, self._query_log_text(query, values)), exc_info=True)
-                if raise_error:
-                    if ori_cursor is None:
-                        cursor.close()
-                    raise e
-                break
-        if fetchall:
-            return ()
-        return 0
-
-    @staticmethod
-    def _auto_format_query(query, arg, escape_auto_format):
-        return query.format('({})'.format(','.join(('`{}`'.format(key) for key in arg) if escape_auto_format else map(
-            str, arg))) if isinstance(arg, dict) else '', ','.join(('%s',) * len(arg)))  # sqlserver不使用``而使用[]
-
     def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
               escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3,
               time_sleep_connect=3, raise_error=False):
@@ -339,6 +119,226 @@ class SqlUtil(object):
             return ()
         self.commit()
         return result
+
+    def close(self, try_close=True):
+        if try_close:
+            try:
+                self.connection.close()
+            except self.lib.ProgrammingError:
+                # _mysql_exceptions.ProgrammingError: closing a closed connection
+                pass
+        else:
+            self.connection.close()
+
+    @property
+    def autocommit(self):
+        return self._autocommit
+
+    @autocommit.setter
+    def autocommit(self, value):
+        if hasattr(self, 'connection') and value != self._autocommit:
+            self.connection.autocommit(value)
+        self._autocommit = value
+
+    @contextlib.contextmanager
+    def transaction(self):
+        self.begin()
+        try:
+            yield self
+            self.commit()
+        except Exception:
+            self.rollback()
+
+    def begin(self):
+        self.temp_autocommit = self._autocommit
+        self.autocommit = False
+        self.set_connection()
+        self.connection.begin()
+
+    def commit(self):
+        self.connection.commit()
+        if self.temp_autocommit is not None:
+            self.autocommit = self.temp_autocommit
+            self.temp_autocommit = None
+
+    def rollback(self):
+        self.connection.rollback()
+        if self.temp_autocommit is not None:
+            self.autocommit = self.temp_autocommit
+            self.temp_autocommit = None
+
+    def connect(self):
+        self.connection = self.lib.connect(host=self.host, port=self.port, user=self.user, password=self.password,
+                                           database=self.database, charset=self.charset, autocommit=self._autocommit)
+
+    def set_connection(self):
+        if not hasattr(self, 'connection'):
+            self.try_connect()
+
+    def try_connect(self, try_times_connect=3, time_sleep_connect=3, raise_error=False):
+        try_count_connect = 0
+        while True:
+            try:
+                self.connect()
+                return
+            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
+                try_count_connect += 1
+                if try_times_connect and try_count_connect >= try_times_connect:
+                    if self.log:
+                        self.logger.error('{}(max retry({})): {}  (in try_connect)'.format(
+                            str(type(e))[8:-2], try_count_connect, e), exc_info=True)
+                    if raise_error:
+                        raise e
+                    return
+                if self.log:
+                    self.logger.error('{}(retry({}), sleep {}): {}  (in try_connect)'.format(
+                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e), exc_info=True)
+                if time_sleep_connect:
+                    time.sleep(time_sleep_connect)
+            except Exception as e:
+                if self.log:
+                    self.logger.error('{}: {}  (in try_connect)'.format(str(type(e))[8:-2], e), exc_info=True)
+                if raise_error:
+                    raise e
+                return
+
+    def try_execute(self, query, values=None, args=None, cursor=None, fetchall=True, dictionary=None, many=False,
+                    commit=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
+        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
+        # values可以为None
+        ori_cursor = cursor
+        if cursor is None:
+            cursor = self._before_query_and_get_cursor(fetchall, self.dictionary if dictionary is None else dictionary)
+        try_count_connect = 0
+        while True:
+            try:
+                result = self.execute(query, values, fetchall, dictionary, many, commit, cursor)
+                if ori_cursor is None:
+                    cursor.close()
+                return result
+            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
+                try_count_connect += 1
+                if try_times_connect and try_count_connect >= try_times_connect:
+                    if self.log:
+                        self.logger.error('{}(max retry({})): {}  args: {}  {}'.format(
+                            str(type(e))[8:-2], try_count_connect, e, args, self._query_log_text(query, values)),
+                            exc_info=True)
+                    if raise_error:
+                        if ori_cursor is None:
+                            cursor.close()
+                        raise e
+                    break
+                if self.log:
+                    self.logger.error('{}(retry({}), sleep {}): {}  args: {}  {}'.format(
+                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e, args,
+                        self._query_log_text(query, values)), exc_info=True)
+                if time_sleep_connect:
+                    time.sleep(time_sleep_connect)
+            except Exception as e:
+                self.rollback()
+                if self.log:
+                    self.logger.error('{}: {}  args: {}  {}'.format(
+                        str(type(e))[8:-2], e, args, self._query_log_text(query, values)), exc_info=True)
+                if raise_error:
+                    if ori_cursor is None:
+                        cursor.close()
+                    raise e
+                break
+        if fetchall:
+            return ()
+        return 0
+
+    def execute(self, query, values=None, fetchall=True, dictionary=None, many=False, commit=True, cursor=None):
+        ori_cursor = cursor
+        if cursor is None:
+            cursor = self._before_query_and_get_cursor(fetchall, self.dictionary if dictionary is None else dictionary)
+        if not many:
+            cursor.execute(query, values)
+        else:  # executemany: 一句插入多条记录，当语句超出1024000字符时拆分成多个语句；传单条记录需用列表包起来
+            cursor.executemany(query, values)
+        if commit and not self._autocommit:
+            self.commit()
+        result = cursor.fetchall() if fetchall else 1 if not many else len(values)
+        if ori_cursor is None:
+            cursor.close()
+        return result
+
+    @staticmethod
+    def standardize_args(args, keep_args_list=False, empty_string_to_none=True, keep_args_as_dict=False):
+        if args is None:
+            return args
+        if not keep_args_list:
+            if isinstance(args, dict) and not keep_args_as_dict:
+                args = tuple(args.values())
+            if empty_string_to_none and hasattr(args, '__iter__'):
+                if isinstance(args, dict) and keep_args_as_dict:
+                    args = {key: value if value != '' else None for key, value in args.items()}
+                else:
+                    args = tuple(each if each != '' else None for each in args)
+        else:
+            if not isinstance(args, (
+                    dict, list, tuple)):  # 已知mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                args = list(args)
+            if isinstance(args, dict) or not isinstance(args[0], (dict, list, tuple)):
+                args = [args]
+            if isinstance(args[0], dict) and not keep_args_as_dict:
+                args = [tuple(each.values()) for each in args]
+            if empty_string_to_none:
+                if isinstance(args[0], dict) and keep_args_as_dict:
+                    args = [{key: value if value != '' else None for key, value in each.items()} for each in args]
+                else:
+                    args = [tuple(e if e != '' else None for e in each) for each in args]
+        return args
+
+    def ping(self):
+        try:
+            self.connection.ping()
+        except (self.lib.InterfaceError, self.lib.OperationalError):
+            # MySQLdb._exceptions.OperationalError: (2013, 'Lost connection to MySQL server during query')
+            # MySQLdb._exceptions.OperationalError: (2006, 'MySQL server has gone away')
+            # _mysql_exceptions.InterfaceError: (0, '')
+            self.close()
+            self.try_connect()
+        except AttributeError:
+            # AttributeError: 'SqlUtil' object has no attribute 'connection'
+            # AttributeError: 'NoneType' object has no attribute 'ping'
+            self.try_connect()
+
+    def format(self, query, args, raise_error=True):
+        try:
+            if args is None:
+                return query
+            if isinstance(args, dict):
+                new_args = dict((key, self.connection.literal(item)) for key, item in args.items())
+                return query % new_args if '%' in query else query.format(**new_args)
+            new_args = tuple(map(self.connection.literal, args))
+            return query % new_args if '%' in query else query.format(*new_args)
+        except Exception as e:
+            if raise_error:
+                raise e
+            return
+
+    def try_format(self, query, args):
+        try:
+            return self.format(query, args, True)
+        except Exception as e:
+            return '{}: {}: {}'.format(query, str(type(e))[8:-2], e)
+
+    @staticmethod
+    def _auto_format_query(query, arg, escape_auto_format):
+        return query.format('({})'.format(','.join(('`{}`'.format(key) for key in arg) if escape_auto_format else map(
+            str, arg))) if isinstance(arg, dict) else '', ','.join(('%s',) * len(arg)))  # sqlserver不使用``而使用[]
+
+    def _before_query_and_get_cursor(self, fetchall, dictionary):
+        if dictionary and fetchall:
+            cursor_class = self.lib.cursors.DictCursor
+        else:
+            cursor_class = None
+        self.set_connection()
+        return self.connection.cursor(cursor_class)
+
+    def _query_log_text(self, query, values):
+        return 'formatted_query: {}'.format(self.try_format(query, values))
 
     def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=True, empty_string_to_none=True,
                   try_times_connect=3, time_sleep_connect=3, raise_error=False):
