@@ -73,11 +73,11 @@ class SqlUtil(base_sql_util.SqlUtil):
                             ','.join(':{}'.format(i) for i in range(1, len(arg) + 1)))  # oracle不使用``而使用""
 
     def _before_query_and_get_cursor(self, fetchall, dictionary):
-        if fetchall and dictionary != self.dictionary:
-            if hasattr(self, 'connection'):
-                self.connection.as_dict = dictionary
-            self.dictionary = dictionary
         self.set_connection()
+        if fetchall and (self.dictionary if dictionary is None else dictionary):
+            cursor = self.connection.cursor()
+            cursor.rowfactory = lambda *args: dict(zip((col[0] for col in cursor.description), args))
+            return cursor
         return self.connection.cursor()
 
     def _query_log_text(self, query, values):
