@@ -1,30 +1,65 @@
-import cx_Oracle
 import time
+
+import cx_Oracle
 
 import base_sql_util
 
 
 class SqlUtil(base_sql_util.SqlUtil):
+    lib = cx_Oracle
+
     def __init__(self, host, port=1521, user=None, password=None, database=None, charset='utf8', autocommit=True,
-                 connect_now=True, dictionary=True, log=True):
-        self.lib = cx_Oracle
-        super().__init__(host, port, user, password, database, charset, autocommit, connect_now, dictionary, log)
-
-    def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
-              escape_auto_format=False, empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3,
-              time_sleep_connect=3, raise_error=False):
-        # oracle如果用双引号escape字段则区分大小写，故默认不escape
-        return super().query(query, args, fetchall, dictionary, many, commit, auto_format, escape_auto_format,
-                             empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                             raise_error)
-
-    def save_data(self, data_list=None, table=None, statement='INSERT INTO', extra=None, many=False, auto_format=True,
-                  key=None, escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False,
-                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
+                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=True,
+                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=False,
+                 try_times_connect=3, time_sleep_connect=3, raise_error=False):
+        # oracle如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # oracle无replace语句；insert必须带into
-        return super().save_data(data_list, table, statement, extra, many, auto_format, key, escape_auto_format,
-                                 empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                                 raise_error)
+        super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
+                         statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
+                         keep_args_as_dict, try_times_connect, time_sleep_connect, raise_error)
+
+    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False,
+              commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None, empty_string_to_none=None,
+              keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None):
+        # cx_Oracle.Cursor.execute不支持%s，但支持:1, :2, ...
+        # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
+        # auto_format=True: 注意此时query会被format一次；首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
+        # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
+        args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
+        if not args:
+            return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
+                                    time_sleep_connect, raise_error)
+        if escape_auto_format is None:
+            escape_auto_format = self.escape_auto_format
+        if not is_multiple or not_one_by_one:  # 执行一次
+            if auto_format:
+                if escape_formatter is None:
+                    escape_formatter = self.escape_formatter
+                arg = args[0] if is_multiple else args
+                query = query.format('({})'.format(','.join((escape_formatter.format(
+                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
+                    arg, dict) else '', ','.join(':{}'.format(i) for i in range(1, len(args) + 1)))
+            return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
+                                    time_sleep_connect, raise_error)
+        # 依次执行
+        ori_query = query
+        result = [] if fetchall else 0
+        if auto_format and escape_formatter is None:
+            escape_formatter = self.escape_formatter
+        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
+        for i, arg in enumerate(args):
+            if auto_format:
+                query = ori_query.format('({})'.format(','.join((escape_formatter.format(
+                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
+                    arg, dict) else '', ','.join(':{}'.format(i) for i in range(1, len(args) + 1)))
+            temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
+                                           time_sleep_connect, raise_error, cursor)
+            if fetchall:
+                result.append(temp_result)
+            else:
+                result += temp_result
+        cursor.close()
+        return result
 
     @property
     def autocommit(self):
@@ -41,17 +76,19 @@ class SqlUtil(base_sql_util.SqlUtil):
             self.host, self.port, self.database), encoding=self.charset)
         self.connection.autocommit = self._autocommit
 
-    def execute(self, query, values=None, fetchall=True, dictionary=None, many=False, commit=True, cursor=None):
+    def execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None, cursor=None):
+        # cx_Oracle.Cursor.execute不能传入None
+        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         ori_cursor = cursor
         if cursor is None:
-            cursor = self._before_query_and_get_cursor(fetchall, self.dictionary if dictionary is None else dictionary)
+            cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         if not many:
-            cursor.execute(query, () if values is None else values)
+            cursor.execute(query, () if args is None else args)
         else:  # executemany: 一句插入多条记录，当语句超出1024000字符时拆分成多个语句；传单条记录需用列表包起来
-            cursor.executemany(query, values)
+            cursor.executemany(query, args)
         if commit and not self._autocommit:
             self.commit()
-        result = cursor.fetchall() if fetchall else 1 if not many else len(values)
+        result = cursor.fetchall() if fetchall else len(args) if many and hasattr(args, '__len__') else 1
         if ori_cursor is None:
             cursor.close()
         return result
@@ -66,13 +103,8 @@ class SqlUtil(base_sql_util.SqlUtil):
             if raise_error:
                 raise e
             return
-    @staticmethod
-    def _auto_format_query(query, arg, escape_auto_format):
-        return query.format('({})'.format(','.join(('"{}"'.format(key) for key in arg) if escape_auto_format else
-                                                   map(str, arg))) if isinstance(arg, dict) else '',
-                            ','.join(':{}'.format(i) for i in range(1, len(arg) + 1)))  # oracle不使用``而使用""
 
-    def _before_query_and_get_cursor(self, fetchall, dictionary):
+    def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
         self.set_connection()
         if fetchall and (self.dictionary if dictionary is None else dictionary):
             cursor = self.connection.cursor()
@@ -80,30 +112,30 @@ class SqlUtil(base_sql_util.SqlUtil):
             return cursor
         return self.connection.cursor()
 
-    def _query_log_text(self, query, values):
-        return 'query: {}'.format(self.try_format(query, values))
-
-
-    def call_proc(self, name, args=(), kwargs=None, fetchall=True, dictionary=None, commit=True,
-                  empty_string_to_none=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # 增加kwargs
+    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
+                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None, kwargs=None):
+        # cx_Oracle.Cursor.callproc支持kwargs
         # 执行存储过程
         # name: 存储过程名
         # args: 存储过程参数(不能为None，要可迭代)
         # fetchall=False: return成功执行数(1)
         if kwargs is None:
             kwargs = {}
-        if dictionary is None:
-            dictionary = self.dictionary
-        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
-        if args and empty_string_to_none:
+        if try_times_connect is None:
+            try_times_connect = self.try_times_connect
+        if time_sleep_connect is None:
+            time_sleep_connect = self.time_sleep_connect
+        if raise_error is None:
+            raise_error = self.raise_error
+        if args and (self.empty_string_to_none if empty_string_to_none is None else empty_string_to_none):
             args = tuple(each if each != '' else None for each in args)
+        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         try_count_connect = 0
         while True:
             try:
                 cursor.callproc(name, args, kwargs)
                 if commit and not self._autocommit:
-                    self.connection.commit()
+                    self.commit()
                 result = cursor.fetchall() if fetchall else 1
                 cursor.close()
                 return result
@@ -123,8 +155,7 @@ class SqlUtil(base_sql_util.SqlUtil):
                 if time_sleep_connect:
                     time.sleep(time_sleep_connect)
             except Exception as e:
-                # 执行失败便不会产生效果，没有需要一并回滚的
-                # self.connection.rollback()
+                self.rollback()
                 if self.log:
                     self.logger.error('{}: {}  proc: {}  args: {}'.format(str(type(e))[8:-2], e, name, args),
                                       exc_info=True)
@@ -136,26 +167,31 @@ class SqlUtil(base_sql_util.SqlUtil):
             return ()
         return 0
 
-    def call_func(self, name, return_type, args=(), kwargs=None, fetchall=True, dictionary=None, commit=True,
-                  empty_string_to_none=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
+    def call_func(self, name, return_type, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
+                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None, kwargs=None):
         # 执行函数
         # name: 函数名
-        # return_type: 返回值的类型(必填)，参见https://cx-oracle.readthedocs.io/en/latest/user_guide/plsql_execution.html#plsqlfunc, https://cx-oracle.readthedocs.io/en/latest/api_manual/cursor.html#Cursor.callfunc
+        # return_type: 返回值的类型(必填)，参见 https://cx-oracle.readthedocs.io/en/latest/user_guide/plsql_execution.html#plsqlfunc
+        #                                    https://cx-oracle.readthedocs.io/en/latest/api_manual/cursor.html#Cursor.callfunc
         # args: 函数参数(不能为None，要可迭代)
         # fetchall=False: return成功执行数(1)
         if kwargs is None:
             kwargs = {}
-        if dictionary is None:
-            dictionary = self.dictionary
-        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
-        if args and empty_string_to_none:
+        if try_times_connect is None:
+            try_times_connect = self.try_times_connect
+        if time_sleep_connect is None:
+            time_sleep_connect = self.time_sleep_connect
+        if raise_error is None:
+            raise_error = self.raise_error
+        if args and (self.empty_string_to_none if empty_string_to_none is None else empty_string_to_none):
             args = tuple(each if each != '' else None for each in args)
+        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         try_count_connect = 0
         while True:
             try:
                 cursor.callfunc(name, return_type, args, kwargs)
                 if commit and not self._autocommit:
-                    self.connection.commit()
+                    self.commit()
                 result = cursor.fetchall() if fetchall else 1
                 cursor.close()
                 return result
@@ -175,8 +211,7 @@ class SqlUtil(base_sql_util.SqlUtil):
                 if time_sleep_connect:
                     time.sleep(time_sleep_connect)
             except Exception as e:
-                # 执行失败便不会产生效果，没有需要一并回滚的
-                # self.connection.rollback()
+                self.rollback()
                 if self.log:
                     self.logger.error('{}: {}  func: {}  args: {}'.format(str(type(e))[8:-2], e, name, args),
                                       exc_info=True)

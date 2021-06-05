@@ -4,18 +4,16 @@ import base_sql_util
 
 
 class SqlUtil(base_sql_util.SqlUtil):
-    def __init__(self, host, port=1433, user=None, password=None, database=None, charset='utf8', autocommit=True,
-                 connect_now=True, dictionary=True, log=True):
-        self.lib = pymssql
-        super().__init__(host, port, user, password, database, charset, autocommit, connect_now, dictionary, log)
+    lib = pymssql
 
-    def save_data(self, data_list=None, table=None, statement='INSERT', extra=None, many=False, auto_format=True,
-                  key=None, escape_auto_format=True, empty_string_to_none=True, keep_args_as_dict=False,
-                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
+    def __init__(self, host, port=1433, user=None, password=None, database=None, charset='utf8', autocommit=True,
+                 connect_now=True, log=True, table=None, statement_save_data='INSERT', dictionary=True,
+                 escape_auto_format=True, escape_formatter='[{}]', empty_string_to_none=True, keep_args_as_dict=False,
+                 try_times_connect=3, time_sleep_connect=3, raise_error=False):
         # sqlserver无replace语句
-        return super().save_data(data_list, table, statement, extra, many, auto_format, key, escape_auto_format,
-                                 empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                                 raise_error)
+        super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
+                         statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
+                         keep_args_as_dict, try_times_connect, time_sleep_connect, raise_error)
 
     def begin(self):
         self.temp_autocommit = self._autocommit
@@ -29,31 +27,23 @@ class SqlUtil(base_sql_util.SqlUtil):
 
     def ping(self):
         # pymssql.Connection没有ping
-        pass
+        self.set_connection()
 
     def format(self, query, args, raise_error=True):
         # pymssql.Connection没有literal和escape，暂不借鉴mysql实现
         try:
             if args is None:
                 return query
-            return query % args
+            return query % args if '%' in query else query.format(args)
         except Exception as e:
             if raise_error:
                 raise e
             return
 
-    @staticmethod
-    def _auto_format_query(query, arg, escape_auto_format):
-        return query.format('({})'.format(','.join(('[{}]'.format(key) for key in arg) if escape_auto_format else map(
-            str, arg))) if isinstance(arg, dict) else '', ','.join(('%s',) * len(arg)))  # sqlserver不使用``而使用[]
-
-    def _before_query_and_get_cursor(self, fetchall, dictionary):
-        if fetchall and dictionary != self.dictionary:
+    def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
+        if fetchall and dictionary is not None and dictionary != self.dictionary:
             if hasattr(self, 'connection'):
                 self.connection.as_dict = dictionary
             self.dictionary = dictionary
         self.set_connection()
         return self.connection.cursor()
-
-    def _query_log_text(self, query, values):
-        return 'query: {}'.format(self.try_format(query, values))

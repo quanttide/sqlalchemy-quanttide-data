@@ -10,17 +10,20 @@ import base_sql_util
 
 
 class SqlUtil(base_sql_util.SqlUtil):
+    lib = sqlalchemy.exc
+
     def __init__(self, dialect=None, driver=None, host=None, port=None, user=None, password=None, database=None,
-                 charset=None, autocommit=True, connect_now=True, dictionary=False, origin_result=False, dataset=False,
-                 log=True, is_pool=False, pool_size=1, engine_kwargs=None, **kwargs):
+                 charset=None, autocommit=True, connect_now=True, log=True, table=None,
+                 statement_save_data='INSERT INTO', dictionary=False, escape_auto_format=None, escape_formatter=None,
+                 empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3, time_sleep_connect=3,
+                 raise_error=False, origin_result=False, dataset=False, is_pool=False, pool_size=1, engine_kwargs=None,
+                 **kwargs):
         # dialect也可输入完整url；或者将完整url存于环境变量：DATABASE_URL
         # 完整url格式：dialect[+driver]://user:password@host/dbname[?key=value..]
         # 优先级: dictionary > origin_result > dataset
-        # 注意许多方法在base_sql_util的基础上有增减参数
         url = dialect if host is None else '{}{}://{}:{}@{}{}{}'.format(
             dialect, '' if driver is None else '+{}'.format(driver), user, password, host,
             '' if port is None else ':{}'.format(port), '' if database is None else '/{}'.format(database))
-        self.lib = sqlalchemy.exc
         if engine_kwargs is None:
             engine_kwargs = {}
         if is_pool:
@@ -30,114 +33,124 @@ class SqlUtil(base_sql_util.SqlUtil):
         if charset is not None:
             kwargs['charset'] = charset
         engine_kwargs.setdefault('execution_options', {})['autocommit'] = autocommit
-        self._autocommit = autocommit
-        self.temp_autocommit = None
-        self.dictionary = dictionary
+        engine_kwargs['connect_args'] = kwargs
         self.origin_result = origin_result
         self.dataset = dataset
         self._transactions = []
-        self.log = log
-        if log:
-            import logging
-            self.logger = logging.getLogger(__name__)
-        engine_kwargs['connect_args'] = kwargs
         self.engine = records.Database(url, **engine_kwargs)
-        if connect_now:
-            self.try_connect()
+        self.origin_engine = self.engine._engine
+        if escape_auto_format is None:  # postgresql, oracle如果escape字段则区分大小写，故当前仅mysql设默认escape
+            escape_auto_format = self.engine.db_url.lower().startswith('mysql')
+        if escape_formatter is None:
+            lower_url = self.engine.db_url.lower()
+            if lower_url.startswith('mysql'):
+                escape_formatter = '`{}`'
+            elif lower_url.startswith(('postgresql', 'oracle', 'sqlite')):
+                escape_formatter = '"{}"'
+            elif lower_url.startswith('sqlserver'):
+                escape_formatter = '[{}]'
+        super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
+                         statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
+                         keep_args_as_dict, try_times_connect, time_sleep_connect, raise_error)
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, origin_result=None, dataset=None, many=True,
-              commit=True, auto_format=False, escape_auto_format=False, escape_punc="`", empty_string_to_none=True,
-              keep_args_as_dict=False, try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # postgresql如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
+    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False,
+              commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None, empty_string_to_none=None,
+              keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None, origin_result=None, dataset=None):
+        # sqlalchemy无cursor；增加origin_result, dataset参数
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True: 注意此时query会被format一次；首条记录需为dict（many=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
-        # fetchall=False: return成功执行语句数(many模式按数据条数)
-        is_args_list = isinstance(args, (list, tuple)) and isinstance(args[0], (
-            dict, list, tuple, set))  # set在standardize_args中转为list
-        values = self.standardize_args(args, is_args_list, empty_string_to_none,
-                                       keep_args_as_dict and not auto_format)  # many=True但单条记录的不套列表，预备转非many模式
-        if not is_args_list or many:  # 执行一次
+        # auto_format=True: 注意此时query会被format一次；首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
+        # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
+        args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
+        if not args:
+            return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
+                                    time_sleep_connect, raise_error, origin_result=origin_result, dataset=dataset)
+        if escape_auto_format is None:
+            escape_auto_format = self.escape_auto_format
+        if not is_multiple or not_one_by_one:  # 执行一次
             if auto_format:
-                arg = args[0] if is_args_list else args
-                query = self._auto_format_query(query, arg, escape_auto_format, escape_punc)
-            return self.try_execute(query, values, args, fetchall, dictionary, origin_result, dataset, is_args_list,
-                                    commit, try_times_connect, time_sleep_connect,
-                                    raise_error)  # many=True但单条记录的转非many模式
+                if escape_formatter is None:
+                    escape_formatter = self.escape_formatter
+                arg = args[0] if is_multiple else args
+                query = query.format('({})'.format(','.join((escape_formatter.format(
+                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
+                    arg, dict) else '', ','.join(('%s',) * len(arg)))
+            return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
+                                    time_sleep_connect, raise_error, origin_result=origin_result, dataset=dataset)
         # 依次执行
         ori_query = query
         result = [] if fetchall else 0
-        for i, value in enumerate(values):
+        if auto_format and escape_formatter is None:
+            escape_formatter = self.escape_formatter
+        for i, arg in enumerate(args):
             if auto_format:
-                query = self._auto_format_query(ori_query, args[i], escape_auto_format, escape_punc)
-            temp_result = self.try_execute(query, value, args[i], fetchall, dictionary, origin_result, dataset, many,
-                                           commit, try_times_connect, time_sleep_connect, raise_error)
+                query = ori_query.format('({})'.format(','.join((escape_formatter.format(
+                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
+                    arg, dict) else '', ','.join(('%s',) * len(arg)))
+            temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
+                                           time_sleep_connect, raise_error, origin_result=origin_result,
+                                           dataset=dataset)
             if fetchall:
                 result.append(temp_result)
             else:
                 result += temp_result
         return result
 
-    def save_data(self, data_list=None, table=None, statement='INSERT INTO', extra=None, many=False, auto_format=True,
-                  key=None, escape_auto_format=True, escape_punc="`", empty_string_to_none=True,
-                  keep_args_as_dict=False, try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # data_list 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True: 首条记录需为dict（many=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值; auto_format=False: 数据需按%s,...格式传入key并按顺序排好各字段值，或者按%(name)s,...格式传入key并且所有记录均为dict
-        # 默认many=False: 为了部分记录无法插入时能够单独跳过这些记录（有log）
-        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
-        # def query(self, query, args=None, fetchall=True, dictionary=None, many=True, commit=True, auto_format=False,
-        #           escape_auto_format=False, escape_punc="`", empty_string_to_none=True, keep_args_as_dict=False,
-        #           try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        if not data_list:
-            return 0
-        query = '{} {}{} VALUES({{}}){}'.format(
-            statement, table, '{}' if auto_format else '' if key is None else '({})'.format(key),
-            ' {}'.format(extra) if extra is not None else '')
-        return self.query(query, data_list, False, False, False, False, many, True, auto_format, escape_auto_format,
-                          escape_punc, empty_string_to_none, keep_args_as_dict, try_times_connect, time_sleep_connect,
-                          raise_error)
-
-    def select_to_try(self, table, num=1, key_field='id', extra_field='', tried=0, tried_after=1,
-                      tried_field='is_tried', finished=None, finished_after=None, finished_field='is_finished',
-                      select_where=None, select_extra='', update_set=None, set_extra='', update_where=None,
-                      update_extra='', try_times_connect=3, time_sleep_connect=3, raise_error=False):
-        # key_field: update一句where部分使用, extra_field: 不在update一句使用, return结果包含key_field和extra_field
-        # select_where: 不为None则替换select一句的where部分（需以 空格where 开头）
-        # update_set: 不为None则替换update一句的set部分（不需set和空格）
-        # update_where: 不为None则替换update一句的where部分（需以 空格where 开头）
+    def select_to_try(self, table=None, num=1, key_fields='id', extra_fields='', tried=0, tried_after=1,
+                      tried_field='is_tried', finished=0, finished_field='is_finished', plus_1_field='',
+                      autocommit_after=True, select_where=None, select_extra='', update_set=None, set_extra='',
+                      update_where=None, update_extra='', try_times_connect=None, time_sleep_connect=None,
+                      raise_error=None):
+        # sqlalchemy事务使用不同；采用origin_result=True
+        # key_fields: update一句where部分使用, extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
+        # finished_field: select一句 where finished_field=finished，finished设为None则取消
+        # plus_1_field: update一句令其+=1
+        # select_where: 不为None则替换select一句的where部分(为''时删除where)
+        # update_set: 不为None则替换update一句的set部分
+        # update_where: 不为None则替换update一句的where部分
+        if table is None:
+            table = self.table
+        if not isinstance(key_fields, str):
+            key_fields = ','.join(key_fields)
+        if extra_fields is not None and not isinstance(extra_fields, str):
+            extra_fields = ','.join(extra_fields)
+        if select_where is None:
+            select_where = ' where {}={}{}'.format(tried_field, tried, '' if finished is None else ' and {}={}'.format(
+                finished_field, finished))
+        elif select_where:
+            if not select_where.startswith(' where'):
+                select_where = ' where ' + select_where.lstrip(' ')
+            elif select_where.startswith('where'):
+                select_where = ' ' + select_where
+        query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
+                                                   select_where, select_extra, ' limit {}'.format(num) if num else '')
         transaction = self.begin()
-        query = 'select {}{} from {}{}{}'.format(
-            key_field, ',' + extra_field if extra_field else '', table, ' where {}={}{}{}'.format(
-                tried_field, tried, '' if finished is None else ' and {}={}'.format(finished_field, finished),
-                select_extra) if select_where is None else select_where,
-            '' if num is None or num == 0 else ' limit {}'.format(num))
-        result = self.try_execute(query, None, None, True, False, False, False, False, False, try_times_connect,
-                                  time_sleep_connect, raise_error)
+        result = self.query(query, None, True, False, True, False, False, try_times_connect, time_sleep_connect,
+                            raise_error, origin_result=True)
         if not result:
             self.commit(transaction)
+            if autocommit_after is not None:
+                self.autocommit = autocommit_after
             return result
         if update_where is None:
-            if num == 1:
-                if ',' in key_field:
-                    update_where = ' where {}'.format(' and '.join('{}={}'.format(
-                        key, result[0][i]) for i, key in enumerate(key_field.split(','))))
-                else:
-                    update_where = ' where {}={}'.format(key_field, result[0])
-            else:
-                if ',' in key_field:
-                    update_where = ' where {}'.format(' or '.join(' and '.join('{}={}'.format(
-                        key, row[i]) for i, key in enumerate(key_field.split(',')))) for row in result)
-                else:
-                    update_where = ' where {}'.format(' or '.join('{}={}'.format(key_field, row[0])) for row in result)
-        query = 'update {} set {}{}{}'.format(
-            table, '{}={}{}{}'.format(tried_field, tried_after, '' if finished_after is None else ' and {}={}'.format(
-                finished_field, finished_after), set_extra) if update_set is None else update_set, update_where,
-            update_extra)
-        temp_result = self.try_execute(query, None, None, False, False, False, False, False, False, try_times_connect,
-                                       time_sleep_connect, raise_error)
-        if not temp_result:
+            update_where = ' or '.join(' and '.join('{}={}'.format(key, row[i]) for i, key in enumerate(
+                key_fields.split(','))) for row in result)
+        elif update_where.startswith('where'):
+            update_where = update_where[5:].lstrip(' ')
+        elif update_where.startswith(' where'):
+            update_where = update_where[6:].lstrip(' ')
+        query = 'update {} set {} where {}{}'.format(table, '{}{}'.format(' and '.join(filter(None, ('{}={}'.format(
+            tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
+            plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
+                                                     update_extra)
+        is_success = self.query(query, None, False, False, True, False, False, try_times_connect, time_sleep_connect,
+                                raise_error)
+        if is_success:
+            self.commit(transaction)
+        else:
+            result = ()
             self.rollback(transaction)
-            return ()
-        self.commit(transaction)
+        if autocommit_after is not None:
+            self.autocommit = autocommit_after
         return result
 
     def close(self, try_close=True):
@@ -163,12 +176,14 @@ class SqlUtil(base_sql_util.SqlUtil):
     @autocommit.setter
     def autocommit(self, value):
         if hasattr(self, 'connection') and value != self._autocommit:
-            self.engine._engine.update_execution_options(autocommit=value)
-            self.connection._conn = self.connection._conn.execution_options(autocommit=value)
+            self.origin_engine.update_execution_options(autocommit=value)
+            self.origin_connection = self.origin_connection.execution_options(autocommit=value)
+            self.connection._conn = self.origin_connection
         self._autocommit = value
 
     @contextlib.contextmanager
     def transaction(self):
+        # return: transaction
         transaction = self.begin()
         try:
             yield transaction
@@ -180,7 +195,7 @@ class SqlUtil(base_sql_util.SqlUtil):
         self.temp_autocommit = self._autocommit
         self.autocommit = False
         self.set_connection()
-        transaction = self.connection._conn.begin()
+        transaction = self.origin_connection.begin()
         self._transactions.append(transaction)
         return transaction
 
@@ -204,38 +219,44 @@ class SqlUtil(base_sql_util.SqlUtil):
 
     def connect(self):
         self.connection = self.engine.get_connection()
+        self.origin_connection = self.connection._conn
 
-    def try_execute(self, query, values=None, args=None, fetchall=True, dictionary=None, origin_result=None,
-                    dataset=None, many=False, commit=True, try_times_connect=3, time_sleep_connect=3,
-                    raise_error=False):
+    def try_execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None,
+                    try_times_connect=None, time_sleep_connect=None, raise_error=None, cursor=None, origin_result=None,
+                    dataset=None):
+        # sqlalchemy无cursor；增加origin_result, dataset参数
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
-        # values可以为None
+        if try_times_connect is None:
+            try_times_connect = self.try_times_connect
+        if time_sleep_connect is None:
+            time_sleep_connect = self.time_sleep_connect
+        if raise_error is None:
+            raise_error = self.raise_error
         self.set_connection()
         try_count_connect = 0
         while True:
             try:
-                return self.execute(query, values, fetchall, dictionary, origin_result, dataset, many, commit)
+                return self.execute(query, args, fetchall, dictionary, many, commit, cursor, origin_result, dataset)
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
                 try_count_connect += 1
                 if try_times_connect and try_count_connect >= try_times_connect:
                     if self.log:
-                        self.logger.error('{}(max retry({})): {}  args: {}  {}'.format(
-                            str(type(e))[8:-2], try_count_connect, e, args, self._query_log_text(query, values)),
-                            exc_info=True)
+                        self.logger.error('{}(max retry({})): {}  {}'.format(
+                            str(type(e))[8:-2], try_count_connect, e, self._query_log_text(query, args)), exc_info=True)
                     if raise_error:
                         raise e
                     break
                 if self.log:
-                    self.logger.error('{}(retry({}), sleep {}): {}  args: {}  {}'.format(
-                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e, args,
-                        self._query_log_text(query, values)), exc_info=True)
+                    self.logger.error('{}(retry({}), sleep {}): {}  {}'.format(
+                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e,
+                        self._query_log_text(query, args)), exc_info=True)
                 if time_sleep_connect:
                     time.sleep(time_sleep_connect)
             except Exception as e:
                 self.rollback()
                 if self.log:
-                    self.logger.error('{}: {}  args: {}  {}'.format(
-                        str(type(e))[8:-2], e, args, self._query_log_text(query, values)), exc_info=True)
+                    self.logger.error('{}: {}  {}'.format(
+                        str(type(e))[8:-2], e, self._query_log_text(query, args)), exc_info=True)
                 if raise_error:
                     raise e
                 break
@@ -243,8 +264,10 @@ class SqlUtil(base_sql_util.SqlUtil):
             return ()
         return 0
 
-    def execute(self, query, values=None, fetchall=True, dictionary=None, origin_result=None, dataset=None, many=False,
-                commit=True):
+    def execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None, cursor=None,
+                origin_result=None, dataset=None):
+        # 覆盖调用逻辑；增加origin_result, dataset参数
+        # fetchall=False: return成功执行语句数(many模式按数据条数)
         if dictionary is None:
             dictionary = self.dictionary
         if origin_result is None:
@@ -252,30 +275,35 @@ class SqlUtil(base_sql_util.SqlUtil):
         if dataset is None:
             dataset = self.dataset
         self.set_connection()
-        if values is None:
-            cursor = self.connection._conn.execute(sqlalchemy.sql.expression.text(query))
+        if args is None:
+            cursor = self.origin_connection.execute(sqlalchemy.sql.expression.text(query))
         elif not many:
-            if isinstance(values, dict):
-                cursor = self.connection._conn.execute(sqlalchemy.sql.expression.text(query), **values)
+            if isinstance(args, dict):
+                cursor = self.origin_connection.execute(sqlalchemy.sql.expression.text(query), **args)
             else:
-                cursor = self.connection._conn.execute(sqlalchemy.sql.expression.text(query % values))
+                cursor = self.origin_connection.execute(sqlalchemy.sql.expression.text(query % args))
         else:
-            cursor = self.connection._conn.execute(sqlalchemy.sql.expression.text(query), *values)
-        if origin_result and fetchall and not dictionary:
-            return list(cursor)
-        result = records.RecordCollection((records.Record(cursor.keys(), row) for row in cursor)
-                                          if cursor.returns_rows else iter(()))
+            cursor = self.origin_connection.execute(sqlalchemy.sql.expression.text(query), *args)
         if commit and not self._autocommit:
             self.commit()
         if not fetchall:
-            return 1 if not many else len(values)
-        elif dictionary:
+            return len(args) if many and hasattr(args, '__len__') else 1
+        if origin_result and not dictionary:
+            return list(cursor)
+        result = records.RecordCollection((records.Record(cursor.keys(), row) for row in cursor)
+                                          if cursor.returns_rows else iter(()))
+        if dictionary:
             return result.all(as_dict=True)
-        elif dataset:
+        if dataset:
             return result.dataset
         return result
 
+    def ping(self):
+        # sqlalchemy没有ping
+        self.set_connection()
+
     def format(self, query, args, raise_error=True):
+        # sqlalchemy没有literal和escape，暂不借鉴mysql实现
         try:
             if args is None:
                 return query
@@ -285,20 +313,31 @@ class SqlUtil(base_sql_util.SqlUtil):
                 raise e
             return
 
-    @staticmethod
-    def _auto_format_query(query, arg, escape_auto_format, escape_punc="`"):
-        return query.format('({})'.format(','.join(('{1}{0}{1}'.format(
-            key, escape_punc) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-            arg, dict) else '', ','.join(('%s',) * len(arg)))  # postgresql不使用``而使用""
+    def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
+        # sqlalchemy无cursor，不使用该方法，替代以直接调用set_connection
+        raise NotImplementedError
 
-    def query_file(self, path, args=None, fetchall=True, dictionary=None, dataset=None, builtin_list=None, many=True,
-                   commit=True, auto_format=False, escape_auto_format=False, escape_punc="`", empty_string_to_none=True,
-                   keep_args_as_dict=False, try_times_connect=3, time_sleep_connect=3, raise_error=False):
+    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
+                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None, origin_result=None,
+                  dataset=None):
+        # sqlalchemy以直接execute执行存储过程；增加origin_result, dataset参数
+        # 执行存储过程
+        # name: 存储过程名
+        # args: 存储过程参数(可以为None)
+        # fetchall=False: return成功执行数(1)
+        query = '{}{}'.format(name, '({})'.format(','.join(args)) if args else '')
+        return self.query(query, None, fetchall, dictionary, True, False, commit, try_times_connect, time_sleep_connect,
+                          raise_error, origin_result=origin_result, dataset=dataset)
+
+    def query_file(self, path, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False,
+                   commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None,
+                   empty_string_to_none=None, keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None,
+                   origin_result=None, dataset=None):
         with open(path) as f:
             query = f.read()
-        return self.query(query, args, fetchall, dictionary, dataset, builtin_list, many, commit, auto_format,
-                          escape_auto_format, escape_punc, empty_string_to_none, keep_args_as_dict, try_times_connect,
-                          time_sleep_connect, raise_error)
+        return self.query(query, args, fetchall, dictionary, not_one_by_one, auto_format, commit, try_times_connect,
+                          time_sleep_connect, raise_error, empty_string_to_none, keep_args_as_dict, escape_auto_format,
+                          escape_formatter, origin_result, dataset)
 
     def get_table_names(self):
         return self.engine.get_table_names()

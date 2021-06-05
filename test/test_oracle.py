@@ -1,6 +1,7 @@
 import cx_Oracle
-import oracle_util
 import records
+
+import oracle_util
 import env
 
 connection = cx_Oracle.connect(user=env.oracle['user'], password=env.oracle['password'],
@@ -32,6 +33,9 @@ print(database.query('select :a from dual', {'a': 2}, keep_args_as_dict=True))
 print(database.query('select :a from dual', [2]))
 print(database.query('select 1 from dual'))
 print(database.query('select * from test'))
+print(database.query('select :a from dual', [2], dictionary=True))
+print(database.query('select 1 from dual', dictionary=True))
+print(database.query('select * from test', dictionary=True))
 
 connection = records.Database('oracle://{user}:{password}@{host}:{port}/{database}'.format(
     **env.oracle)).get_connection()

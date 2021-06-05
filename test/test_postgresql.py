@@ -1,8 +1,9 @@
 import psycopg2
+import records
+
 import postgresql_util
 import sqlalchemy_util
 import records_util
-import records
 import env
 
 connection = psycopg2.connect(**env.postgresql)
