@@ -23,7 +23,8 @@ class SqlUtil(base_sql_util.SqlUtil):
               keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None):
         # cx_Oracle.Cursor.execute不支持%s，但支持:1, :2, ...
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True: 注意此时query会被format一次；首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
+        # auto_format=True: 注意此时query会被format一次；
+        #                   首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
         args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
         if not args:
@@ -47,7 +48,7 @@ class SqlUtil(base_sql_util.SqlUtil):
         if auto_format and escape_formatter is None:
             escape_formatter = self.escape_formatter
         cursor = self._before_query_and_get_cursor(fetchall, dictionary)
-        for i, arg in enumerate(args):
+        for arg in args:
             if auto_format:
                 query = ori_query.format('({})'.format(','.join((escape_formatter.format(
                     key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
@@ -171,8 +172,9 @@ class SqlUtil(base_sql_util.SqlUtil):
                   time_sleep_connect=None, raise_error=None, empty_string_to_none=None, kwargs=None):
         # 执行函数
         # name: 函数名
-        # return_type: 返回值的类型(必填)，参见 https://cx-oracle.readthedocs.io/en/latest/user_guide/plsql_execution.html#plsqlfunc
-        #                                    https://cx-oracle.readthedocs.io/en/latest/api_manual/cursor.html#Cursor.callfunc
+        # return_type: 返回值的类型(必填)，参见：
+        #              https://cx-oracle.readthedocs.io/en/latest/user_guide/plsql_execution.html#plsqlfunc
+        #              https://cx-oracle.readthedocs.io/en/latest/api_manual/cursor.html#Cursor.callfunc
         # args: 函数参数(不能为None，要可迭代)
         # fetchall=False: return成功执行数(1)
         if kwargs is None:

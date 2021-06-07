@@ -81,7 +81,7 @@ class SqlUtil(base_sql_util.SqlUtil):
         result = [] if fetchall else 0
         if auto_format and escape_formatter is None:
             escape_formatter = self.escape_formatter
-        for i, arg in enumerate(args):
+        for arg in args:
             if auto_format:
                 query = ori_query.format('({})'.format(','.join((escape_formatter.format(
                     key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
