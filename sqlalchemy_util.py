@@ -25,11 +25,14 @@ class SqlUtil(base_sql_util.SqlUtil):
                  **kwargs):
         # dialect也可输入完整url；或者将完整url存于环境变量：DATABASE_URL
         # 完整url格式：dialect[+driver]://user:password@host/dbname[?key=value..]
+        # 对user和password影响sqlalchemy解析url的字符进行转义(sqlalchemy解析完url会对user和password解转义) (若从dialect或环境变量传入整个url，需提前转义好)
+        # sqlalchemy不会对database进行解转义，故database含?时需放入engine_kwargs['connect_args']['database']
         # 优先级: dictionary > origin_result > dataset
         url = os.environ.get(
             'DATABASE_URL') if dialect is None else dialect if host is None else '{}{}://{}:{}@{}{}{}'.format(
-            dialect, '' if driver is None else '+{}'.format(driver), user, password, host,
-            '' if port is None else ':{}'.format(port), '' if database is None else '/{}'.format(database))
+            dialect, '' if driver is None else '+{}'.format(driver), user.replace(':', '%3A').replace('/', '%2F'),
+            password.replace('@', '%40'), host, '' if port is None else ':{}'.format(port),
+            '' if database is None else '/{}'.format(database))
         if engine_kwargs is None:
             engine_kwargs = {}
         if is_pool:
@@ -39,7 +42,10 @@ class SqlUtil(base_sql_util.SqlUtil):
         if charset is not None:
             kwargs['charset'] = charset
         engine_kwargs.setdefault('execution_options', {})['autocommit'] = autocommit
-        engine_kwargs['connect_args'] = kwargs
+        if engine_kwargs.get('connect_args'):
+            engine_kwargs['connect_args'].update(kwargs)
+        else:
+            engine_kwargs['connect_args'] = kwargs
         self.origin_result = origin_result
         self.dataset = dataset
         self._transactions = []
