@@ -9,7 +9,7 @@ class SqlUtil(base_sql_util.SqlUtil):
     lib = psycopg2
 
     def __init__(self, host, port=5432, user=None, password=None, database=None, charset=None, autocommit=True,
-                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=True,
+                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
                  escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=False,
                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
         # postgresql如果用双引号escape字段则区分大小写，故默认escape_auto_format=False

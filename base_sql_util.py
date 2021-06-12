@@ -10,7 +10,7 @@ class SqlUtil(object):
     # lib.cursors.DictCursor: query, call_proc
     # lib.connect: connect
     def __init__(self, host, port=None, user=None, password=None, database=None, charset=None, autocommit=True,
-                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=True,
+                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
                  escape_auto_format=False, escape_formatter='{}', empty_string_to_none=True, keep_args_as_dict=False,
                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
         self.host = host
@@ -38,11 +38,12 @@ class SqlUtil(object):
         if connect_now:
             self.try_connect()
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False,
+    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
               commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None, empty_string_to_none=None,
               keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None):
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True: 注意此时query会被format一次；首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
+        # auto_format=True或keys不为None: 注意此时query会被format一次；
+        #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
         args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
         if not args:
@@ -51,23 +52,40 @@ class SqlUtil(object):
         if escape_auto_format is None:
             escape_auto_format = self.escape_auto_format
         if not is_multiple or not_one_by_one:  # 执行一次
-            if auto_format:
+            if auto_format or keys is not None:
                 if escape_formatter is None:
                     escape_formatter = self.escape_formatter
-                arg = args[0] if is_multiple else args
-                query = query.format('({})'.format(','.join((escape_formatter.format(
-                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                    arg, dict) else '', ','.join(('%s',) * len(arg)))
+                if keys is None:
+                    arg = args[0] if is_multiple else args
+                    query = query.format('({})'.format(','.join((escape_formatter.format(
+                        key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
+                        arg, dict) else '', ','.join(('%s',) * len(arg)))
+                elif isinstance(keys, str):
+                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
+                                                                keys.split(',')) if escape_auto_format else keys),
+                                         ','.join(('%s',) * (keys.count(',') + 1)))
+                else:
+                    query = query.format('({})'.format(','.join((escape_formatter.format(
+                        key) for key in keys) if escape_auto_format else keys)), ','.join(('%s',) * len(keys)))
             return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
                                     time_sleep_connect, raise_error)
         # 依次执行
         ori_query = query
         result = [] if fetchall else 0
-        if auto_format and escape_formatter is None:
-            escape_formatter = self.escape_formatter
+        if auto_format or keys is not None:
+            if escape_formatter is None:
+                escape_formatter = self.escape_formatter
+            if keys is not None:
+                if isinstance(keys, str):
+                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
+                                                                keys.split(',')) if escape_auto_format else keys),
+                                         ','.join(('%s',) * (keys.count(',') + 1)))
+                else:
+                    query = query.format('({})'.format(','.join((escape_formatter.format(
+                        key) for key in keys) if escape_auto_format else keys)), ','.join(('%s',) * len(keys)))
         cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         for arg in args:
-            if auto_format:
+            if auto_format and keys is None:
                 query = ori_query.format('({})'.format(','.join((escape_formatter.format(
                     key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
                     arg, dict) else '', ','.join(('%s',) * len(arg)))
@@ -80,27 +98,25 @@ class SqlUtil(object):
         cursor.close()
         return result
 
-    def save_data(self, args, table=None, statement=None, extra=None, not_one_by_one=False, auto_format=True, key=None,
-                  commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None,
-                  escape_auto_format=None, empty_string_to_none=None, keep_args_as_dict=None):
+    def save_data(self, args, table=None, statement=None, extra=None, not_one_by_one=False, keys=None, commit=None,
+                  try_times_connect=None, time_sleep_connect=None, raise_error=None, escape_auto_format=None,
+                  empty_string_to_none=None, keep_args_as_dict=None):
         # data_list 支持单条记录: list/tuple/dict，或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True: 首条记录需为dict（one_by_one=True时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值
-        # auto_format=False: 数据需按%s,...格式传入key并按顺序排好各字段值，或者按%(name)s,...格式传入key并且所有记录均为dict
+        # 首条记录需为dict（one_by_one=True时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录（有log）
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
         if not args and args != 0:
             return 0
-        query = '{} {}{} VALUES({{}}){}'.format(
+        query = '{} {}{{}} VALUES({{}}){}'.format(
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
-            '{}' if auto_format else '' if key is None else '({})'.format(key),
             ' {}'.format(extra) if extra is not None else '')
-        return self.query(query, args, False, False, not_one_by_one, auto_format, commit, try_times_connect,
+        return self.query(query, args, False, False, not_one_by_one, True, keys, commit, try_times_connect,
                           time_sleep_connect, raise_error, escape_auto_format, empty_string_to_none, keep_args_as_dict)
 
     def select_to_try(self, table=None, num=1, key_fields='id', extra_fields='', tried=0, tried_after=1,
-                      tried_field='is_tried', finished=0, finished_field='is_finished', plus_1_field='',
-                      autocommit_after=True, select_where=None, select_extra='', update_set=None, set_extra='',
-                      update_where=None, update_extra='', try_times_connect=None, time_sleep_connect=None,
+                      tried_field='is_tried', finished=None, finished_field='is_finished', plus_1_field='',
+                      dictionary=None, autocommit_after=None, select_where=None, select_extra='', update_set=None,
+                      set_extra='', update_where=None, update_extra='', try_times_connect=None, time_sleep_connect=None,
                       raise_error=None):
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
@@ -126,16 +142,20 @@ class SqlUtil(object):
         query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
                                                    select_where, select_extra, ' limit {}'.format(num) if num else '')
         self.begin()
-        result = self.query(query, None, True, False, True, False, False, try_times_connect, time_sleep_connect,
-                            raise_error)
+        result = self.query(query, None, True, dictionary, True, False, None, False, try_times_connect,
+                            time_sleep_connect, raise_error)
         if not result:
             self.commit()
             if autocommit_after is not None:
                 self.autocommit = autocommit_after
             return result
         if update_where is None:
-            update_where = ' or '.join(' and '.join('{}={}'.format(key, row[i]) for i, key in enumerate(
-                key_fields.split(','))) for row in result)
+            if dictionary:
+                update_where = ' or '.join(' and '.join('{}={}'.format(key, row[key]) for key in key_fields.split(
+                    ',')) for row in result)
+            else:
+                update_where = ' or '.join(' and '.join('{}={}'.format(key, row[i]) for i, key in enumerate(
+                    key_fields.split(','))) for row in result)
         elif update_where.startswith('where'):
             update_where = update_where[5:].lstrip(' ')
         elif update_where.startswith(' where'):
@@ -144,8 +164,8 @@ class SqlUtil(object):
             tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
             plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
                                                      update_extra)
-        is_success = self.query(query, None, False, False, True, False, False, try_times_connect, time_sleep_connect,
-                                raise_error)
+        is_success = self.query(query, None, False, False, True, False, None, False, try_times_connect,
+                                time_sleep_connect, raise_error)
         if is_success:
             self.commit()
         else:
@@ -181,7 +201,7 @@ class SqlUtil(object):
         elif update_where.startswith(' where'):
             update_where = update_where[6:].lstrip(' ')
         query = 'update {} set {}={} where {}{}'.format(table, finished_field, finished, update_where, update_extra)
-        return self.query(query, None, False, False, True, False, commit, try_times_connect, time_sleep_connect,
+        return self.query(query, None, False, False, True, None, False, commit, try_times_connect, time_sleep_connect,
                           raise_error)
 
     def close(self, try_close=True):

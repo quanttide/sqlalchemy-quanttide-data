@@ -7,7 +7,7 @@ class SqlUtil(base_sql_util.SqlUtil):
     lib = pymssql
 
     def __init__(self, host, port=1433, user=None, password=None, database=None, charset='utf8', autocommit=True,
-                 connect_now=True, log=True, table=None, statement_save_data='INSERT', dictionary=True,
+                 connect_now=True, log=True, table=None, statement_save_data='INSERT', dictionary=False,
                  escape_auto_format=True, escape_formatter='[{}]', empty_string_to_none=True, keep_args_as_dict=False,
                  try_times_connect=3, time_sleep_connect=3, raise_error=False):
         # sqlserver无replace语句
