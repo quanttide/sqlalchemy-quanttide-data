@@ -2,13 +2,19 @@
 
 SQL数据库的Python操作库的封装。
 
-## 维护者
+## 特性
 
-- Owner：黄日航（huangrihang@quanttide.com）
-- Reviewer：张果（zhangguo@quanttide.com）
-- 创建日期：2021-06-03
-- 更新日期：2021-06-13
-- 代码版本：0.3.0
+- TODO
+- TODO
+
+## 下载安装
+
+TODO
+
+### 依赖
+
+- xxx
+
 
 ## 快速入门
 
@@ -135,3 +141,16 @@ DB.finish([[1], [2]], 'my_table', key_fields='field_1')
 # 单条数据亦可不由列表包裹: DB.finish([1], 'my_table') 或 DB.finish(1, 'my_table')
 ```
 
+## 更新日志
+
+[CHANGELOG](CHANGELOG)
+
+## 开源协议
+
+[Apache 2.0](LICENSE)
+
+
+## 贡献者
+
+- 黄日航（huangrihang@quanttide.com）
+- 张果（zhangguo@quanttide.com）
