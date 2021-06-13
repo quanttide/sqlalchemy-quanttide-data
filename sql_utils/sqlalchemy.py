@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import time
 import contextlib
 import os
@@ -11,10 +13,10 @@ import sqlalchemy.sql.expression
 import sqlalchemy.engine.create
 import sqlalchemy.inspection
 
-from sql_utils import base_sql_util
+import sql_utils.base
 
 
-class SqlUtil(base_sql_util.SqlUtil):
+class SqlUtil(sql_utils.base.SqlUtil):
     lib = sqlalchemy.exc
 
     def __init__(self, dialect=None, driver=None, host=None, port=None, user=None, password=None, database=None,

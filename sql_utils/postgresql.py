@@ -1,11 +1,13 @@
+# -*- coding: utf-8 -*-
+
 import time
 
 import psycopg2.extras
 
-from sql_utils import base_sql_util
+import sql_utils.base
 
 
-class SqlUtil(base_sql_util.SqlUtil):
+class SqlUtil(sql_utils.base.SqlUtil):
     lib = psycopg2
 
     def __init__(self, host, port=5432, user=None, password=None, database=None, charset=None, autocommit=True,

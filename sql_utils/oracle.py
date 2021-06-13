@@ -1,11 +1,13 @@
+# -*- coding: utf-8 -*-
+
 import time
 
 import cx_Oracle
 
-from sql_utils import base_sql_util
+import sql_utils.base
 
 
-class SqlUtil(base_sql_util.SqlUtil):
+class SqlUtil(sql_utils.base.SqlUtil):
     lib = cx_Oracle
 
     def __init__(self, host, port=1521, user=None, password=None, database=None, charset='utf8', autocommit=True,

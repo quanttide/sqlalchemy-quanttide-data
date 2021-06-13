@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
+
 import pymssql
 
-from sql_utils import base_sql_util
+import sql_utils.base
 
 
-class SqlUtil(base_sql_util.SqlUtil):
+class SqlUtil(sql_utils.base.SqlUtil):
     lib = pymssql
 
     def __init__(self, host, port=1433, user=None, password=None, database=None, charset='utf8', autocommit=True,
