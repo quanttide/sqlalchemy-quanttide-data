@@ -1,9 +1,13 @@
+# -*- coding: utf-8 -*-
+
 import cx_Oracle
 import records
 
-from sql_utils import oracle_util
+import sql_utils.oracle
+import sql_utils.sqlalchemy
 import env
 
+print('cx_Oracle:')
 connection = cx_Oracle.connect(user=env.oracle['user'], password=env.oracle['password'],
                                dsn='{host}:{port}/{database}'.format(**env.oracle), encoding='utf8')
 connection.autocommit = True
@@ -25,18 +29,20 @@ cursor.close()
 connection.commit()
 connection.close()
 
-database = oracle_util.SqlUtil(**env.oracle)
+print('\nsql_utils.postgresql:')
+db = sql_utils.oracle.SqlUtil(**env.oracle)
 # print(database.query('insert into test values (1,2)', fetchall=False))
-print(database.query('insert into test values (:1,:2)', (3, 4), fetchall=False))
-print(database.save_data((5, 6), 'test'))
-print(database.query('select :a from dual', {'a': 2}, keep_args_as_dict=True))
-print(database.query('select :a from dual', [2]))
-print(database.query('select 1 from dual'))
-print(database.query('select * from test'))
-print(database.query('select :a from dual', [2], dictionary=True))
-print(database.query('select 1 from dual', dictionary=True))
-print(database.query('select * from test', dictionary=True))
+print(db.query('insert into test values (:1,:2)', (3, 4), fetchall=False))
+print(db.save_data((5, 6), 'test'))
+print(db.query('select :a from dual', {'a': 2}, keep_args_as_dict=True))
+print(db.query('select :a from dual', [2]))
+print(db.query('select 1 from dual'))
+print(db.query('select * from test'))
+print(db.query('select :a from dual', [2], dictionary=True))
+print(db.query('select 1 from dual', dictionary=True))
+print(db.query('select * from test', dictionary=True))
 
+print('\nrecords:')
 connection = records.Database('oracle://{user}:{password}@{host}:{port}/{database}'.format(
     **env.oracle)).get_connection()
 print(connection.bulk_query('insert into test values (7,8)'))
@@ -47,3 +53,16 @@ print(connection.query('select :a from dual', **{'a': '2'}).all())
 print(connection.query('select :a from dual', a='3').all())
 print(connection.query('select 1 from dual').all())
 print(connection.query('select * from test').all())
+
+print('\nsql_utils.sqlalchemy:')
+db = sql_utils.sqlalchemy.SqlUtil(**env.oracle)
+# print(database.query('insert into test values (1,2)', fetchall=False))
+print(db.query('insert into test values (:1,:2)', (15, 16), fetchall=False))
+print(db.save_data((17, 18), 'test'))
+print(db.query('select :a from dual', {'a': 2}, keep_args_as_dict=True))
+print(db.query('select :a from dual', [2]))
+print(db.query('select 1 from dual'))
+print(db.query('select * from test'))
+print(db.query('select :a from dual', [2], dictionary=True))
+print(db.query('select 1 from dual', dictionary=True))
+print(db.query('select * from test', dictionary=True))
