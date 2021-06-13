@@ -1,7 +1,7 @@
 import cx_Oracle
 import records
 
-import oracle_util
+from sql_utils import oracle_util
 import env
 
 connection = cx_Oracle.connect(user=env.oracle['user'], password=env.oracle['password'],

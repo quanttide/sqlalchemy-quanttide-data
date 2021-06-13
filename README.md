@@ -21,7 +21,7 @@ base_sql_util.py是基础文件，其余每个xxx_util.py文件对应一个被�
 只需将base_sql_util.py, sqlalchemy_util.py这两个文件放入项目目录或云函数的层，然后import：（推荐像这样直接导入SqlUtil类，这样若后续需更换其它util.py文件时只需修改import语句）
 
 ```python
-from sqlalchemy_util import SqlUtil
+from sql_utils.sqlalchemy import SqlUtil
 ```
 
 ### 建立实例(并自动连接)

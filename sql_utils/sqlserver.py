@@ -1,6 +1,6 @@
 import pymssql
 
-import base_sql_util
+from sql_utils import base_sql_util
 
 
 class SqlUtil(base_sql_util.SqlUtil):
