@@ -4,27 +4,84 @@ SQL数据库的Python操作库的封装。
 
 ## 特性
 
-- TODO
-- TODO
+- 封装各个SQL数据库的Python操作库，提供基本一致的API，只需更换import语句（以及其它一些小调整）即可更换底层库甚至更换数据库类型（如从MySQL更换为PostgreSQL）
 
 ## 下载安装
 
-TODO
+### pip安装
+
+- 第一种：安装对应模块依赖：（推荐）
+
+Tips：1. 如需一次性安装多个，在中括号内用逗号隔开即可。2. 支持别名：mysql->mysqlclient，pgsql->psycopg2，psycopg2->psycopg2，psycopg2-binary->psycopg2-binary。
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[sqlalchemy]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[sqlalchemy,mysqlclient]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[records]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[mysqlclient]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[pymysql]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[postgresql]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[sqlserver]
+```
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[oracle]
+```
+
+- 第二种：仅安装本库，自行安装依赖：
+
+```shell
+pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git
+```
+
+Tips：腾讯云云函数已内置依赖：[](https://cloud.tencent.com/document/product/583/55592)
+
+​	包含：mysqlclient, PyMySQL, psycopg2-binary（import名仍为psycopg2，只是从pip角度为与psycopg2不相关的两个包）
 
 ### 依赖
 
-- xxx
+各模块依赖：
+
+- sql_utils.sqlalchemy 依赖 sqlalchemy, tablib（以及对应引擎库）
+- sql_utils.records 依赖 records（以及对应引擎库）
+- sql_utils.mysqlclient 依赖 mysqlclient
+- sql_utils.pymysql 依赖 pymysql
+- sql_utils.postgresql 依赖 psycopg2
+- sql_utils.sqlserver 依赖 pymssql
+- sql_utils.oracle 依赖 cx_Oracle
+
+### 另一种方式：直接引入文件
+
+以sql_utils.sqlalchemy为例，只需将sql_utils/base.py, sql_utils/sqlalchemy.py这两个文件放入项目目录或云函数的层即可。
 
 
 ## 快速入门
 
-base_sql_util.py是基础文件，其余每个xxx_util.py文件对应一个被封装的第三方库。
+sql_utils/base.py是基础文件，sql_utils目录下其余每个模块对应一个被封装的第三方库。
 
-推荐使用sqlalchemy_util.py，以下均以sqlalchemy_util.py为例。
+推荐使用sql_utils.sqlalchemy，以下均以sql_utils.sqlalchemy为例。
 
-### 引入文件
+### 导入模块
 
-只需将base_sql_util.py, sqlalchemy_util.py这两个文件放入项目目录或云函数的层，然后import：（推荐像这样直接导入SqlUtil类，这样若后续需更换其它util.py文件时只需修改import语句）
+推荐像这样直接导入SqlUtil类，这样若后续需更换其它模块时只需修改import语句：
 
 ```python
 from sql_utils.sqlalchemy import SqlUtil
@@ -76,7 +133,7 @@ DB.save_data([['a', 1], ['b', 2]], 'my_table', keys=['field_2', 'field_1'])
 
 查询数据或执行自定义SQL语句均使用query方法。
 
-可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sqlalchemy_util & records_util特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_utils.sqlalchemy & sql_utils.records特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 可传入fetchall=False参数，屏蔽SQL语句的执行结果，return成功执行的数据条数。
 
@@ -94,15 +151,15 @@ DB.query('update my_table set field_2=%s where field_1=%s', ['a', 1])
 
 ```python
 DB.query('update my_table set field_2=%s where field_1=%s', [['a', 1], ['b', 2]], not_one_by_one=False)
-# 仅sqlalchemy_util & records_util此种情况需传入not_one_by_one=False，以支持%s填充
+# 仅sql_utils.sqlalchemy & sql_utils.records此种情况需传入not_one_by_one=False，以支持%s填充
 ```
 
 ```python
-DB.query('update my_table set field_2=%(field_2)s where field_1=%(field_1)s', {'field_1': 1, 'field_2': 'a'}, keep_args_as_dict=True)
+DB.query('update my_table set field_2=:field_2 where field_1=:field_1', {'field_1': 1, 'field_2': 'a'})
 ```
 
 ```python
-DB.query('update my_table set field_2=%(field_2)s where field_1=%(field_1)s', [{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], keep_args_as_dict=True)
+DB.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}])
 ```
 
 #### 选取未处理的数据并标记处理中
@@ -111,7 +168,7 @@ DB.query('update my_table set field_2=%(field_2)s where field_1=%(field_1)s', [{
 
 **注意：需提前将事务隔离级别设为REPEATABLE READ。**（MySQL初始为REPEATABLE READ，但PostgreSQL初始不是）
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), tried=0, tried_after=1, finished=None(不启用), finished_field='is_finished'；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sqlalchemy_util & records_util特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), tried=0, tried_after=1, finished=None(不启用), finished_field='is_finished'；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_utils.sqlalchemy & sql_utils.records特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 ```python
 data = DB.select_to_try('my_table', key_fields='field_1', extra_fields='field_2')
