@@ -1,4 +1,4 @@
-# sql-utils
+# sql-client
 
 SQL数据库的Python操作库的封装。
 
@@ -15,41 +15,37 @@ SQL数据库的Python操作库的封装。
 Tips：1. 如需一次性安装多个，在中括号内用逗号隔开即可。2. 支持别名：mysql->mysqlclient，pgsql->psycopg2，psycopg2->psycopg2，psycopg2-binary->psycopg2-binary。
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[sqlalchemy]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[sqlalchemy]
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[sqlalchemy,mysqlclient]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[sqlalchemy,mysqlclient]
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[records]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[mysqlclient]
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[mysqlclient]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[pymysql]
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[pymysql]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[postgresql]
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[postgresql]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[sqlserver]
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[sqlserver]
-```
-
-```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git[oracle]
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git[oracle]
 ```
 
 - 第二种：仅安装本库，自行安装依赖：
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless/sql-utils.git
+pip install git+https://e.coding.net/quanttide/serverless/sql-client.git
 ```
 
 Tips：腾讯云云函数已内置依赖：[](https://cloud.tencent.com/document/product/583/55592)
@@ -60,39 +56,38 @@ Tips：腾讯云云函数已内置依赖：[](https://cloud.tencent.com/document
 
 各模块依赖：
 
-- sql_utils.sqlalchemy 依赖 sqlalchemy, tablib（以及对应引擎库）
-- sql_utils.records 依赖 records（以及对应引擎库）
-- sql_utils.mysqlclient 依赖 mysqlclient
-- sql_utils.pymysql 依赖 pymysql
-- sql_utils.postgresql 依赖 psycopg2
-- sql_utils.sqlserver 依赖 pymssql
-- sql_utils.oracle 依赖 cx_Oracle
+- sql_client.sqlalchemy 依赖 sqlalchemy, tablib（以及对应引擎库）
+- sql_client.mysqlclient 依赖 mysqlclient
+- sql_client.pymysql 依赖 pymysql
+- sql_client.postgresql 依赖 psycopg2
+- sql_client.sqlserver 依赖 pymssql
+- sql_client.oracle 依赖 cx_Oracle
 
 ### 另一种方式：直接引入文件
 
-以sql_utils.sqlalchemy为例，只需将sql_utils/base.py, sql_utils/sqlalchemy.py这两个文件放入项目目录或云函数的层即可。
+以sql_client.sqlalchemy为例，只需将sql_client/base.py, sql_client/sqlalchemy.py这两个文件放入项目目录或云函数的层即可。
 
 
 ## 快速入门
 
-sql_utils/base.py是基础文件，sql_utils目录下其余每个模块对应一个被封装的第三方库。
+sql_client/base.py是基础文件，sql_client目录下其余每个模块对应一个被封装的第三方库。
 
-推荐使用sql_utils.sqlalchemy，以下均以sql_utils.sqlalchemy为例。
+推荐使用sql_client.sqlalchemy，以下均以sql_client.sqlalchemy为例。
 
 ### 导入模块
 
-推荐像这样直接导入SqlUtil类，这样若后续需更换其它模块时只需修改import语句：
+推荐像这样直接导入SqlClient类，这样若后续需更换其它模块时只需修改import语句：
 
 ```python
-from sql_utils.sqlalchemy import SqlUtil
+from sql_client.sqlalchemy import SqlClient
 ```
 
 ### 建立实例(并自动连接)
 
-实例化SqlUtil类（以postgresql为例），建议放于全局变量以复用连接。
+实例化SqlClient类（以postgresql为例），建议放于全局变量以复用连接。
 
 ```python
-DB = SqlUtil(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
+DB = SqlClient(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
 # 亦可传入table='...'参数作为全局的默认表
 # 如希望query方法返回的结果默认为字典格式，可传入dictionary=True
 ```
@@ -133,7 +128,7 @@ DB.save_data([['a', 1], ['b', 2]], 'my_table', keys=['field_2', 'field_1'])
 
 查询数据或执行自定义SQL语句均使用query方法。
 
-可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_utils.sqlalchemy & sql_utils.records特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 可传入fetchall=False参数，屏蔽SQL语句的执行结果，return成功执行的数据条数。
 
@@ -151,7 +146,7 @@ DB.query('update my_table set field_2=%s where field_1=%s', ['a', 1])
 
 ```python
 DB.query('update my_table set field_2=%s where field_1=%s', [['a', 1], ['b', 2]], not_one_by_one=False)
-# 仅sql_utils.sqlalchemy & sql_utils.records此种情况需传入not_one_by_one=False，以支持%s填充
+# 仅sql_client.sqlalchemy此种情况需传入not_one_by_one=False，以支持%s填充
 ```
 
 ```python
@@ -168,7 +163,7 @@ DB.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field
 
 **注意：需提前将事务隔离级别设为REPEATABLE READ。**（MySQL初始为REPEATABLE READ，但PostgreSQL初始不是）
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), tried=0, tried_after=1, finished=None(不启用), finished_field='is_finished'；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_utils.sqlalchemy & sql_utils.records特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), tried=0, tried_after=1, finished=None(不启用), finished_field='is_finished'；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 ```python
 data = DB.select_to_try('my_table', key_fields='field_1', extra_fields='field_2')
