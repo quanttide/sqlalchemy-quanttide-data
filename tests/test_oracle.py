@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 
-import cx_Oracle
-import records
+import sys
 
-import sql_utils.oracle
-import sql_utils.sqlalchemy
+sys.path.append('..')
+
+import cx_Oracle
+
+import sql_client.oracle
+import sql_client.sqlalchemy
 import env
 
 print('cx_Oracle:')
@@ -29,8 +32,8 @@ cursor.close()
 connection.commit()
 connection.close()
 
-print('\nsql_utils.postgresql:')
-db = sql_utils.oracle.SqlUtil(**env.oracle)
+print('\nsql_client.postgresql:')
+db = sql_client.oracle.SqlClient(**env.oracle)
 # print(database.query('insert into test values (1,2)', fetchall=False))
 print(db.query('insert into test values (:1,:2)', (3, 4), fetchall=False))
 print(db.save_data((5, 6), 'test'))
@@ -42,20 +45,8 @@ print(db.query('select :a from dual', [2], dictionary=True))
 print(db.query('select 1 from dual', dictionary=True))
 print(db.query('select * from test', dictionary=True))
 
-print('\nrecords:')
-connection = records.Database('oracle://{user}:{password}@{host}:{port}/{database}'.format(
-    **env.oracle)).get_connection()
-print(connection.bulk_query('insert into test values (7,8)'))
-print(connection.bulk_query('insert into test values (:a,:b)', {'a': 9, 'b': 10}))
-print(connection.bulk_query('insert into test values (:a,:b)', ({'a': 11, 'b': 12},)))
-print(connection.bulk_query('insert into test values (:1,:2)', [{'1': 13, '2': 14}]))
-print(connection.query('select :a from dual', **{'a': '2'}).all())
-print(connection.query('select :a from dual', a='3').all())
-print(connection.query('select 1 from dual').all())
-print(connection.query('select * from test').all())
-
-print('\nsql_utils.sqlalchemy:')
-db = sql_utils.sqlalchemy.SqlUtil(**env.oracle)
+print('\nsql_client.sqlalchemy:')
+db = sql_client.sqlalchemy.SqlClient(**env.oracle)
 # print(database.query('insert into test values (1,2)', fetchall=False))
 print(db.query('insert into test values (:1,:2)', (15, 16), fetchall=False))
 print(db.save_data((17, 18), 'test'))
