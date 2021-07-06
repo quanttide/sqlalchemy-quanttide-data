@@ -4,21 +4,21 @@ import time
 
 import psycopg2.extras
 
-import sql_utils.base
+from sql_client.base import SqlClient as BaseSqlClient
 
 
-class SqlUtil(sql_utils.base.SqlUtil):
+class SqlClient(BaseSqlClient):
     lib = psycopg2
 
-    def __init__(self, host, port=5432, user=None, password=None, database=None, charset=None, autocommit=True,
+    def __init__(self, host=None, port=5432, user=None, password=None, database=None, charset=None, autocommit=True,
                  connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
-                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=False,
-                 try_times_connect=3, time_sleep_connect=3, raise_error=False):
+                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=True,
+                 transform_formatter=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
         # postgresql如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # postgresql无replace语句；insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, try_times_connect, time_sleep_connect, raise_error)
+                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
 
     @property
     def autocommit(self):

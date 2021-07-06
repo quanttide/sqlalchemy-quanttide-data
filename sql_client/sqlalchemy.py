@@ -1,87 +1,139 @@
 # -*- coding: utf-8 -*-
 
+import os
 import time
 import contextlib
-import os
+import re
 from collections import OrderedDict
 from inspect import isclass
+from typing import Optional, Union
 
 import tablib
-import sqlalchemy.pool.impl
-import sqlalchemy.exc
-import sqlalchemy.sql.expression
-import sqlalchemy.engine.create
-import sqlalchemy.inspection
+from sqlalchemy.pool.impl import NullPool
+from sqlalchemy import exc
+from sqlalchemy.sql.expression import text
+from sqlalchemy.engine import create_engine
+from sqlalchemy.inspection import inspect
 
-import sql_utils.base
+from sql_client.base import SqlClient as BaseSqlClient
 
 
-class SqlUtil(sql_utils.base.SqlUtil):
-    lib = sqlalchemy.exc
+class SqlClient(BaseSqlClient):
+    lib = exc
 
-    def __init__(self, dialect=None, driver=None, host=None, port=None, user=None, password=None, database=None,
-                 charset=None, autocommit=True, connect_now=True, log=True, table=None,
-                 statement_save_data='INSERT INTO', dictionary=False, escape_auto_format=None, escape_formatter=None,
-                 empty_string_to_none=True, keep_args_as_dict=False, try_times_connect=3, time_sleep_connect=3,
-                 raise_error=False, origin_result=False, dataset=False, is_pool=False, pool_size=1, engine_kwargs=None,
-                 **kwargs):
+    def __init__(self, dialect: Optional[str] = None, driver: Optional[str] = None, host: Optional[str] = None,
+                 port: Union[int, str, None] = None, user: Optional[str] = None, password: Optional[str] = None,
+                 database: Optional[str] = None, charset: Optional[str] = None, autocommit: bool = True,
+                 connect_now: bool = True, log: bool = True, table: Optional[str] = None,
+                 statement_save_data: Optional[str] = None, dictionary: bool = False,
+                 escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
+                 empty_string_to_none: bool = True, keep_args_as_dict: bool = True, transform_formatter: bool = True,
+                 try_times_connect: Union[int, float] = 3, time_sleep_connect: Union[int, float] = 3,
+                 raise_error: bool = False, origin_result: bool = False, dataset: bool = False, is_pool: bool = False,
+                 pool_size: int = 1, engine_kwargs: Optional[dict] = None, **kwargs):
         # dialect也可输入完整url；或者将完整url存于环境变量：DATABASE_URL
         # 完整url格式：dialect[+driver]://user:password@host/dbname[?key=value..]
         # 对user和password影响sqlalchemy解析url的字符进行转义(sqlalchemy解析完url会对user和password解转义) (若从dialect或环境变量传入整个url，需提前转义好)
-        # sqlalchemy不会对database进行解转义，故database含?时需放入engine_kwargs['connect_args']['database']
+        # sqlalchemy不会对database进行解转义，故database含?时需移至engine_kwargs['connect_args']['database']
+        # sqlalchemy 1.3: database含@时也需移至engine_kwargs['connect_args']['database']
         # 优先级: origin_result > dataset > dictionary
-        url = os.environ.get(
-            'DATABASE_URL') if dialect is None else dialect if host is None else '{}{}://{}:{}@{}{}{}'.format(
-            dialect, '' if driver is None else '+{}'.format(driver), user.replace(':', '%3A').replace('/', '%2F'),
-            password.replace('@', '%40'), host, '' if port is None else ':{}'.format(port),
-            '' if database is None else '/{}'.format(database))
         if engine_kwargs is None:
             engine_kwargs = {}
+        if dialect is None:
+            dialect = os.environ.get('DIALECT') or os.environ.get('dialect') or os.environ.get(
+                'DATABASE_URL') or os.environ.get('database_url')
+        if ':' in dialect:  # 完整url模式
+            url = dialect
+            dialect, tail = url.split('://', 1)
+            if not dialect.islower():
+                dialect = dialect.lower()
+                url = '://'.join((dialect, tail))
+            if '+' in dialect:
+                dialect, driver = dialect.split('+', 1)
+            else:
+                driver = None
+            if dialect == 'sqlserver':
+                dialect = 'mssql'
+                url = 'mssql' + url[9:]
+        else:  # 非完整url模式
+            dialect = dialect.lower()
+            if '+' in dialect:
+                dialect, driver = dialect.split('+', 1)
+            else:
+                if driver is None:
+                    driver = os.environ.get('DRIVER') or os.environ.get('driver')
+                if driver is not None:
+                    driver = driver.lower()
+            if dialect == 'sqlserver':
+                dialect = 'mssql'
+            if host is None:
+                host = os.environ.get('HOST') or os.environ.get('host')
+            if port is None:
+                port = os.environ.get('PORT') or os.environ.get('port')
+            if user is None:
+                user = os.environ.get('USER') or os.environ.get('user')
+            if user is not None:
+                user = user.replace('%', '%25').replace(':', '%3A').replace('/', '%2F')
+            if password is None:
+                password = os.environ.get('PASSWORD') or os.environ.get('password')
+            if password is not None:
+                password = password.replace('%', '%25').replace('@', '%40')
+            if database is None:
+                database = os.environ.get('DATABASE') or os.environ.get('database')
+            if database is not None and ('?' in database or '@' in database):
+                engine_kwargs.setdefault('connect_args', {})['database'] = database
+            url = '{}{}://{}{}{}{}'.format(
+                dialect, '' if driver is None else '+{}'.format(driver),
+                '' if user is None else '{}{}@'.format(user, '' if password is None else ':{}'.format(password)),
+                '' if host is None else host, '' if port is None else ':{}'.format(port),
+                '' if database is None or '?' in database or '@' in database else '/{}'.format(database))
+        self.dialect = dialect
+        self.driver = driver
         if is_pool:
             engine_kwargs['pool_size'] = pool_size
         else:
-            engine_kwargs['poolclass'] = sqlalchemy.pool.impl.NullPool
+            engine_kwargs['poolclass'] = NullPool
         if charset is not None:
             kwargs['charset'] = charset
         engine_kwargs.setdefault('execution_options', {})['autocommit'] = autocommit
-        if engine_kwargs.get('connect_args'):
-            engine_kwargs['connect_args'].update(kwargs)
-        else:
-            engine_kwargs['connect_args'] = kwargs
+        if kwargs:
+            if engine_kwargs.get('connect_args'):
+                engine_kwargs['connect_args'].update(kwargs)
+            else:
+                engine_kwargs['connect_args'] = kwargs
         self.origin_result = origin_result
         self.dataset = dataset
         self._transactions = []
+        if statement_save_data is None:
+            statement_save_data = 'REPLACE' if dialect == 'mysql' else 'INSERT INTO'
         if escape_auto_format is None:  # postgresql, oracle如果escape字段则区分大小写，故当前仅mysql设默认escape
-            escape_auto_format = url.lower().startswith('mysql')
+            escape_auto_format = dialect == 'mysql'
         if escape_formatter is None:
-            lower_url = url.lower()
-            if lower_url.startswith('mysql'):
-                escape_formatter = '`{}`'
-            elif lower_url.startswith(('postgresql', 'oracle', 'sqlite')):
-                escape_formatter = '"{}"'
-            elif lower_url.startswith('sqlserver'):
-                escape_formatter = '[{}]'
-        self.engine = sqlalchemy.engine.create.create_engine(url, **engine_kwargs)
+            escape_formatter = {'mysql': '`{}`', 'postgresql': '"{}"', 'oracle': '"{}"', 'sqlite': '"{}"',
+                                'mssql': '[{}]'}.get(dialect, '{}')
+        self.engine = create_engine(url, **engine_kwargs)
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, try_times_connect, time_sleep_connect, raise_error)
+                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
 
     def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
-              commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None, empty_string_to_none=None,
-              keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None, origin_result=None, dataset=None):
-        # sqlalchemy无cursor；增加origin_result, dataset参数
+              commit=None, escape_auto_format=None, escape_formatter=None, empty_string_to_none=None,
+              keep_args_as_dict=None, transform_formatter=None, try_times_connect=None, time_sleep_connect=None,
+              raise_error=None, origin_result=None, dataset=None):
+        # sqlalchemy无cursor；sqlalchemy不支持位置参数；增加origin_result, dataset参数
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True或keys不为None: 注意此时query会被format一次；
+        # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为True；
         #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
+        args, is_multiple = self.standardize_args(args, None, empty_string_to_none,
+                                                  auto_format or keys is not None or keep_args_as_dict, True)
         if not args:
             return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
                                     time_sleep_connect, raise_error, origin_result=origin_result, dataset=dataset)
         if escape_auto_format is None:
             escape_auto_format = self.escape_auto_format
         if not is_multiple or not_one_by_one:  # 执行一次
-            if auto_format:
+            if auto_format or keys is not None:
                 if escape_formatter is None:
                     escape_formatter = self.escape_formatter
                 if keys is None:
@@ -155,8 +207,9 @@ class SqlUtil(sql_utils.base.SqlUtil):
         query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
                                                    select_where, select_extra, ' limit {}'.format(num) if num else '')
         transaction = self.begin()
-        result = self.query(query, None, True, dictionary, True, False, None, False, try_times_connect,
-                            time_sleep_connect, raise_error, origin_result=origin_result, dataset=dataset)
+        result = self.query(query, fetchall=True, dictionary=dictionary, commit=False, transform_formatter=False,
+                            try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
+                            raise_error=raise_error, origin_result=origin_result, dataset=dataset)
         if not result:
             self.commit(transaction)
             if autocommit_after is not None:
@@ -177,8 +230,9 @@ class SqlUtil(sql_utils.base.SqlUtil):
             tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
             plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
                                                      update_extra)
-        is_success = self.query(query, None, False, False, True, False, None, False, try_times_connect,
-                                time_sleep_connect, raise_error)
+        is_success = self.query(query, fetchall=False, commit=False, transform_formatter=False,
+                                try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
+                                raise_error=raise_error)
         if is_success:
             self.commit(transaction)
         else:
@@ -211,8 +265,9 @@ class SqlUtil(sql_utils.base.SqlUtil):
     @autocommit.setter
     def autocommit(self, value):
         if hasattr(self, 'connection') and value != self._autocommit:
-            self.engine.update_execution_options(autocommit=value)
-            self.connection = self.connection.execution_options(autocommit=value)
+            isolation_level = 'AUTOCOMMIT' if value else self.connection.default_isolation_level
+            self.engine.update_execution_options(isolation_level=isolation_level)
+            self.connection = self.connection.execution_options(isolation_level=isolation_level)
         self._autocommit = value
 
     @contextlib.contextmanager
@@ -375,7 +430,7 @@ class SqlUtil(sql_utils.base.SqlUtil):
         """Returns a list of table names for the connected database."""
 
         # Setup SQLAlchemy for Database inspection.
-        return sqlalchemy.inspection.inspect(self.engine).get_table_names()
+        return inspect(self.engine).get_table_names()
 
 
 class Record(object):

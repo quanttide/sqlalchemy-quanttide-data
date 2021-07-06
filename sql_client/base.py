@@ -1,22 +1,44 @@
 # -*- coding: utf-8 -*-
 
+import os
 import time
 import contextlib
+import re
+from typing import Optional, Union
 
 
-class SqlUtil(object):
+class SqlClient(object):
     lib = None
 
+    # lib模块的以下属性被下列方法使用：
     # lib.ProgrammingError: close
-    # lib.InterfaceError, self.lib.OperationalError: ping, try_connect, try_execute, call_proc
+    # lib.InterfaceError, lib.OperationalError: ping, try_connect, try_execute, call_proc
     # lib.cursors.DictCursor: query, call_proc
     # lib.connect: connect
-    def __init__(self, host, port=None, user=None, password=None, database=None, charset=None, autocommit=True,
-                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
-                 escape_auto_format=False, escape_formatter='{}', empty_string_to_none=True, keep_args_as_dict=False,
-                 try_times_connect=3, time_sleep_connect=3, raise_error=False):
+
+    def __init__(self, host: Optional[str] = None, port: Union[int, str, None] = None, user: Optional[str] = None,
+                 password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = None,
+                 autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
+                 statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
+                 escape_formatter: str = '{}', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
+                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
+        if host is None:
+            host = os.environ.get('HOST') or os.environ.get('host')
+        if port is None:
+            port = os.environ.get('PORT') or os.environ.get('port')
+        if user is None:
+            user = os.environ.get('USER') or os.environ.get('user')
+        if password is None:
+            password = os.environ.get('PASSWORD') or os.environ.get('password')
+        if database is None:
+            database = os.environ.get('DATABASE') or os.environ.get('database')
+        if table is None:
+            table = os.environ.get('TABLE') or os.environ.get('table')
+        if port is None and ':' in host:
+            host, port = host.rsplit(':', 1)
         self.host = host
-        self.port = port
+        self.port = int(port) if isinstance(port, str) else port
         self.user = user
         self.password = password
         self.database = database
@@ -30,6 +52,7 @@ class SqlUtil(object):
         self.escape_formatter = escape_formatter  # sqlserver使用[]，不能只记一个字符
         self.empty_string_to_none = empty_string_to_none
         self.keep_args_as_dict = keep_args_as_dict
+        self.transform_formatter = transform_formatter
         self.try_times_connect = try_times_connect
         self.time_sleep_connect = time_sleep_connect
         self.raise_error = raise_error
@@ -41,13 +64,15 @@ class SqlUtil(object):
             self.try_connect()
 
     def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
-              commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None, empty_string_to_none=None,
-              keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None):
+              commit=None, escape_auto_format=None, escape_formatter=None, empty_string_to_none=None,
+              keep_args_as_dict=None, transform_formatter=None, try_times_connect=None, time_sleep_connect=None,
+              raise_error=None):
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True或keys不为None: 注意此时query会被format一次；
+        # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为False；
         #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
+        args, is_multiple = self.standardize_args(args, None, empty_string_to_none,
+                                                  not auto_format and keys is None and keep_args_as_dict, True)
         if not args:
             return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
                                     time_sleep_connect, raise_error)
@@ -101,8 +126,8 @@ class SqlUtil(object):
         return result
 
     def save_data(self, args, table=None, statement=None, extra=None, not_one_by_one=False, keys=None, commit=None,
-                  try_times_connect=None, time_sleep_connect=None, raise_error=None, escape_auto_format=None,
-                  empty_string_to_none=None, keep_args_as_dict=None):
+                  escape_auto_format=None, escape_formatter=None, empty_string_to_none=None, try_times_connect=None,
+                  time_sleep_connect=None, raise_error=None):
         # data_list 支持单条记录: list/tuple/dict，或多条记录: list/tuple/set[list/tuple/dict]
         # 首条记录需为dict（one_by_one=True时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录（有log）
@@ -112,8 +137,9 @@ class SqlUtil(object):
         query = '{} {}{{}} VALUES({{}}){}'.format(
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
             ' {}'.format(extra) if extra is not None else '')
-        return self.query(query, args, False, False, not_one_by_one, True, keys, commit, try_times_connect,
-                          time_sleep_connect, raise_error, escape_auto_format, empty_string_to_none, keep_args_as_dict)
+        return self.query(query, args, False, False, not_one_by_one, True, keys, commit, escape_auto_format,
+                          escape_formatter, empty_string_to_none, False, False, try_times_connect, time_sleep_connect,
+                          raise_error)
 
     def select_to_try(self, table=None, num=1, key_fields='id', extra_fields='', tried=0, tried_after=1,
                       tried_field='is_tried', finished=None, finished_field='is_finished', plus_1_field='',
@@ -144,8 +170,9 @@ class SqlUtil(object):
         query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
                                                    select_where, select_extra, ' limit {}'.format(num) if num else '')
         self.begin()
-        result = self.query(query, None, True, dictionary, True, False, None, False, try_times_connect,
-                            time_sleep_connect, raise_error)
+        result = self.query(query, fetchall=True, dictionary=dictionary, commit=False, transform_formatter=False,
+                            try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
+                            raise_error=raise_error)
         if not result:
             self.commit()
             if autocommit_after is not None:
@@ -166,8 +193,9 @@ class SqlUtil(object):
             tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
             plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
                                                      update_extra)
-        is_success = self.query(query, None, False, False, True, False, None, False, try_times_connect,
-                                time_sleep_connect, raise_error)
+        is_success = self.query(query, fetchall=False, commit=False, transform_formatter=False,
+                                try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
+                                raise_error=raise_error)
         if is_success:
             self.commit()
         else:
@@ -203,8 +231,8 @@ class SqlUtil(object):
         elif update_where.startswith(' where'):
             update_where = update_where[6:].lstrip(' ')
         query = 'update {} set {}={} where {}{}'.format(table, finished_field, finished, update_where, update_extra)
-        return self.query(query, None, False, False, True, None, False, commit, try_times_connect, time_sleep_connect,
-                          raise_error)
+        return self.query(query, fetchall=False, commit=commit, try_times_connect=try_times_connect,
+                          time_sleep_connect=time_sleep_connect, raise_error=raise_error)
 
     def close(self, try_close=True):
         if try_close:
@@ -429,7 +457,7 @@ class SqlUtil(object):
             self.close()
             self.try_connect()
         except AttributeError:
-            # AttributeError: 'SqlUtil' object has no attribute 'connection'
+            # AttributeError: 'SqlClient' object has no attribute 'connection'
             # AttributeError: 'NoneType' object has no attribute 'ping'
             self.try_connect()
 

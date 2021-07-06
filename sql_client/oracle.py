@@ -1,34 +1,37 @@
 # -*- coding: utf-8 -*-
 
 import time
+import re
 
 import cx_Oracle
 
-import sql_utils.base
+from sql_client.base import SqlClient as BaseSqlClient
 
 
-class SqlUtil(sql_utils.base.SqlUtil):
+class SqlClient(BaseSqlClient):
     lib = cx_Oracle
 
-    def __init__(self, host, port=1521, user=None, password=None, database=None, charset='utf8', autocommit=True,
+    def __init__(self, host=None, port=1521, user=None, password=None, database=None, charset='utf8', autocommit=True,
                  connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
-                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=False,
-                 try_times_connect=3, time_sleep_connect=3, raise_error=False):
+                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=True,
+                 transform_formatter=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
         # oracle如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # oracle无replace语句；insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, try_times_connect, time_sleep_connect, raise_error)
+                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
 
     def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
-              commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None, empty_string_to_none=None,
-              keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None):
+              commit=None, escape_auto_format=None, escape_formatter=None, empty_string_to_none=None,
+              keep_args_as_dict=None, transform_formatter=None, try_times_connect=None, time_sleep_connect=None,
+              raise_error=None):
         # cx_Oracle.Cursor.execute不支持%s，但支持:1, :2, ...
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True或keys不为None: 注意此时query会被format一次；
+        # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为False；
         #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        args, is_multiple = self.standardize_args(args, None, empty_string_to_none, keep_args_as_dict, True)
+        args, is_multiple = self.standardize_args(args, None, empty_string_to_none,
+                                                  not auto_format and keys is None and keep_args_as_dict, True)
         if not args:
             return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
                                     time_sleep_connect, raise_error)
