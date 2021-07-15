@@ -210,7 +210,7 @@ class SqlClient(object):
         # 对key_fields对应result的记录，set finished_field=finished
         # key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
         # update_where: 不为None则替换update一句的where部分
-        result = self.standardize_args(result, True, False, True, True)
+        result = self.standardize_args(result, True, False, True, False)
         if not result:
             return
         if table is None:
