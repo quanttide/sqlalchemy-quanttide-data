@@ -4,7 +4,7 @@ import os
 import time
 import contextlib
 import re
-from typing import Optional, Union
+from typing import Optional, Union, Iterable, Collection, Any
 
 
 class SqlClient(object):
@@ -63,10 +63,13 @@ class SqlClient(object):
         if connect_now:
             self.try_connect()
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
-              commit=None, escape_auto_format=None, escape_formatter=None, empty_string_to_none=None,
-              keep_args_as_dict=None, transform_formatter=None, try_times_connect=None, time_sleep_connect=None,
-              raise_error=None):
+    def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+              not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
+              commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
+              escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
+              keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
+              try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
+              raise_error: Optional[bool] = None) -> Union[int, tuple, list]:
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
         # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为False；
         #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
@@ -125,9 +128,13 @@ class SqlClient(object):
         cursor.close()
         return result
 
-    def save_data(self, args, table=None, statement=None, extra=None, not_one_by_one=False, keys=None, commit=None,
-                  escape_auto_format=None, escape_formatter=None, empty_string_to_none=None, try_times_connect=None,
-                  time_sleep_connect=None, raise_error=None):
+    def save_data(self, args: Any, table: Optional[str] = None, statement: Optional[str] = None,
+                  extra: Optional[str] = None, not_one_by_one: Optional[bool] = False,
+                  keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
+                  escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
+                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+                  ) -> Union[int, tuple, list]:
         # data_list 支持单条记录: list/tuple/dict，或多条记录: list/tuple/set[list/tuple/dict]
         # 首条记录需为dict（one_by_one=True时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录（有log）
@@ -141,11 +148,16 @@ class SqlClient(object):
                           escape_formatter, empty_string_to_none, False, False, try_times_connect, time_sleep_connect,
                           raise_error)
 
-    def select_to_try(self, table=None, num=1, key_fields='id', extra_fields='', tried=0, tried_after=1,
-                      tried_field='is_tried', finished=None, finished_field='is_finished', plus_1_field='',
-                      dictionary=None, autocommit_after=None, select_where=None, select_extra='', update_set=None,
-                      set_extra='', update_where=None, update_extra='', try_times_connect=None, time_sleep_connect=None,
-                      raise_error=None):
+    def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
+                      key_fields: Union[str, Iterable[str]] = 'id', extra_fields: Union[str, Iterable[str], None] = '',
+                      tried: Union[int, str, None] = 0, tried_after: Union[int, str, None] = 1,
+                      tried_field: Optional[str] = 'is_tried', finished: Union[int, str, None] = None,
+                      finished_field: Optional[str] = 'is_finished', plus_1_field: Optional[str] = '',
+                      dictionary: Optional[bool] = None, autocommit_after: Optional[bool] = None,
+                      select_where: Optional[str] = None, select_extra: str = '', update_set: Optional[str] = None,
+                      set_extra: Optional[str] = '', update_where: Optional[str] = None, update_extra: str = '',
+                      try_times_connect: Union[int, float, None] = None,
+                      time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None):
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
         # finished_field: select一句 where finished_field=finished，finished设为None则取消
@@ -205,8 +217,11 @@ class SqlClient(object):
             self.autocommit = autocommit_after
         return result
 
-    def finish(self, result, table=None, key_fields='', finished=1, finished_field='is_finished', commit=True,
-               update_where=None, update_extra='', try_times_connect=None, time_sleep_connect=None, raise_error=None):
+    def finish(self, result: Optional[Iterable], table: Optional[str] = None, key_fields: Optional[str] = '',
+               finished: Union[int, str] = 1, finished_field: str = 'is_finished', commit: bool = True,
+               update_where: Optional[str] = None, update_extra: str = '',
+               try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
+               raise_error: Optional[bool] = None):
         # 对key_fields对应result的记录，set finished_field=finished
         # key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
         # update_where: 不为None则替换update一句的where部分
@@ -390,8 +405,9 @@ class SqlClient(object):
             cursor.close()
         return result
 
-    def standardize_args(self, args, to_multiple=None, empty_string_to_none=None, keep_args_as_dict=None,
-                         get_is_multiple=False):
+    def standardize_args(self, args: Any, to_multiple: Optional[bool] = None,
+                         empty_string_to_none: Optional[bool] = None, keep_args_as_dict: Optional[bool] = None,
+                         get_is_multiple: bool = False):
         if not args and args != 0:
             return args if not get_is_multiple else (args, False)
         if not hasattr(args, '__getitem__'):
