@@ -364,14 +364,14 @@ class SqlClient(BaseSqlClient):
             dataset = self.dataset
         self.set_connection()
         if args is None:
-            cursor = self.connection.execute(sqlalchemy.sql.expression.text(query))
+            cursor = self.connection.execute(text(query))
         elif not many:
             if isinstance(args, dict):
-                cursor = self.connection.execute(sqlalchemy.sql.expression.text(query), **args)
+                cursor = self.connection.execute(text(query), **args)
             else:
-                cursor = self.connection.execute(sqlalchemy.sql.expression.text(query % args))
+                cursor = self.connection.execute(text(query % args))
         else:
-            cursor = self.connection.execute(sqlalchemy.sql.expression.text(query), *args)
+            cursor = self.connection.execute(text(query), *args)
         if commit and not self._autocommit:
             self.commit()
         if not fetchall:
