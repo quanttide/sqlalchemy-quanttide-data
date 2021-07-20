@@ -161,17 +161,16 @@ class SqlClient(BaseSqlClient):
                 escape_formatter = self.escape_formatter
             if keys is not None:
                 if isinstance(keys, str):
-                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
-                                                                keys.split(',')) if escape_auto_format else keys),
-                                         ','.join(('%s',) * (keys.count(',') + 1)))
-                else:
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in keys) if escape_auto_format else keys)), ','.join(('%s',) * len(keys)))
+                    keys = tuple(key.strip() for key in keys.split(','))
+                query = query.format('({})'.format(','.join((escape_formatter.format(
+                    key) for key in keys) if escape_auto_format else keys)), ','.join(map(
+                    ':{}'.format, keys) if isinstance(args[0], dict) else ('%s',) * len(keys)))
         for arg in args:
             if auto_format and keys is None:
                 query = ori_query.format('({})'.format(','.join((escape_formatter.format(
                     key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                    arg, dict) else '', ','.join(('%s',) * len(arg)))
+                    arg, dict) else '', ','.join(map(':{}'.format, arg) if isinstance(arg, dict) else ('%s',) * len(
+                    arg)))
             temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
                                            time_sleep_connect, raise_error, origin_result=origin_result,
                                            dataset=dataset)
