@@ -227,7 +227,7 @@ class SqlClient(object):
         # update_where: 不为None则替换update一句的where部分
         result = self.standardize_args(result, True, False, True, False)
         if not result:
-            return
+            return 0
         if table is None:
             table = self.table
         if not key_fields:
