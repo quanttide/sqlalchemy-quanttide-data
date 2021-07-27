@@ -6,7 +6,7 @@ import contextlib
 import re
 from collections import OrderedDict
 from inspect import isclass
-from typing import Optional, Union
+from typing import Optional, Union, Iterable, Collection, Any
 
 import tablib
 from sqlalchemy.pool.impl import NullPool
@@ -118,10 +118,14 @@ class SqlClient(BaseSqlClient):
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
                          keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
-              commit=None, escape_auto_format=None, escape_formatter=None, empty_string_to_none=None,
-              keep_args_as_dict=None, transform_formatter=None, try_times_connect=None, time_sleep_connect=None,
-              raise_error=None, origin_result=None, dataset=None):
+    def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+              not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
+              commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
+              escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
+              keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
+              try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
+              raise_error: Optional[bool] = None, origin_result: Optional[bool] = None, dataset: Optional[bool] = None
+              ) -> Union[int, tuple, list]:
         # sqlalchemy无cursor；sqlalchemy不支持位置参数；增加origin_result, dataset参数
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
         # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为True；
