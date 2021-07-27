@@ -505,8 +505,8 @@ class SqlClient(object):
         except Exception as e:
             return 'query: {}  args: {}  {}: {}'.format(query, args, str(type(e))[8:-2], e)
 
-    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
-                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None):
+    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, empty_string_to_none=None,
+                  try_times_connect=None, time_sleep_connect=None, raise_error=None):
         # 执行存储过程
         # name: 存储过程名
         # args: 存储过程参数(不能为None，要可迭代)

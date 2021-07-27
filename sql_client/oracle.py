@@ -137,8 +137,8 @@ class SqlClient(BaseSqlClient):
             return cursor
         return self.connection.cursor()
 
-    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
-                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None, kwargs=None):
+    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, empty_string_to_none=None,
+                  try_times_connect=None, time_sleep_connect=None, raise_error=None, kwargs=None):
         # cx_Oracle.Cursor.callproc支持kwargs
         # 执行存储过程
         # name: 存储过程名
@@ -192,8 +192,9 @@ class SqlClient(BaseSqlClient):
             return ()
         return 0
 
-    def call_func(self, name, return_type, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
-                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None, kwargs=None):
+    def call_func(self, name, return_type, args=(), fetchall=True, dictionary=None, commit=None,
+                  empty_string_to_none=None, try_times_connect=None, time_sleep_connect=None, raise_error=None,
+                  kwargs=None):
         # 执行函数
         # name: 函数名
         # return_type: 返回值的类型(必填)，参见：

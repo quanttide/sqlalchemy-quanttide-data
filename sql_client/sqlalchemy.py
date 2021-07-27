@@ -406,9 +406,8 @@ class SqlClient(BaseSqlClient):
         # sqlalchemy无cursor，不使用该方法，替代以直接调用set_connection
         raise NotImplementedError
 
-    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, try_times_connect=None,
-                  time_sleep_connect=None, raise_error=None, empty_string_to_none=None, origin_result=None,
-                  dataset=None):
+    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, empty_string_to_none=None,
+                  try_times_connect=None, time_sleep_connect=None, raise_error=None, origin_result=None, dataset=None):
         # sqlalchemy以直接execute执行存储过程；增加origin_result, dataset参数
         # 执行存储过程
         # name: 存储过程名
