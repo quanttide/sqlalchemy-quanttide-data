@@ -139,7 +139,7 @@ class SqlClient(object):
         # 首条记录需为dict（one_by_one=True时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录（有log）
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        if not args and args != 0:
+        if not args and args not in (0, ''):
             return 0
         query = '{} {}{{}} VALUES({{}}){}'.format(
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
@@ -408,7 +408,7 @@ class SqlClient(object):
     def standardize_args(self, args: Any, to_multiple: Optional[bool] = None,
                          empty_string_to_none: Optional[bool] = None, keep_args_as_dict: Optional[bool] = None,
                          get_is_multiple: bool = False):
-        if not args and args != 0:
+        if not args and args not in (0, ''):
             return args if not get_is_multiple else (args, False)
         if not hasattr(args, '__getitem__'):
             if hasattr(args, '__iter__'):  # set, Generator, range
