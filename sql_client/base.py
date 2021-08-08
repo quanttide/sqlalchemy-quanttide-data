@@ -22,7 +22,7 @@ class SqlClient(object):
                  statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
                  escape_formatter: str = '{}', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
                  transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
-                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False) -> None:
+                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         if host is None:
             host = os.environ.get('HOST') or os.environ.get('host')
         if port is None:

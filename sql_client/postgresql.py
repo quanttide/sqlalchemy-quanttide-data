@@ -1,19 +1,24 @@
 # -*- coding: utf-8 -*-
 
 import time
+from typing import Optional, Union, Any
 
 import psycopg2.extras
+import psycopg2.extensions
 
-from sql_client.base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient
 
 
 class SqlClient(BaseSqlClient):
     lib = psycopg2
 
-    def __init__(self, host=None, port=5432, user=None, password=None, database=None, charset=None, autocommit=True,
-                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
-                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=True,
-                 transform_formatter=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
+    def __init__(self, host: Optional[str] = None, port: Union[int, str, None] = 5432, user: Optional[str] = None,
+                 password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = None,
+                 autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
+                 statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
+                 escape_formatter: str = '"{}"', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
+                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         # postgresql如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # postgresql无replace语句；insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
@@ -21,27 +26,30 @@ class SqlClient(BaseSqlClient):
                          keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
 
     @property
-    def autocommit(self):
+    def autocommit(self) -> bool:
         return self._autocommit
 
     @autocommit.setter
-    def autocommit(self, value):
+    def autocommit(self, value: bool):
         if hasattr(self, 'connection') and value != self._autocommit:
             self.connection.autocommit = value
         self._autocommit = value
 
-    def begin(self):
+    def begin(self) -> None:
         self.temp_autocommit = self._autocommit
         self.autocommit = False
         self.set_connection()
 
-    def connect(self):
+    def connect(self) -> None:
         self.connection = self.lib.connect(host=self.host, port=self.port, user=self.user, password=self.password,
                                            database=self.database)
         self.connection.autocommit = self._autocommit
 
-    def try_execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None,
-                    try_times_connect=None, time_sleep_connect=None, raise_error=None, cursor=None):
+    def try_execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+                    many: bool = False, commit: Optional[bool] = None,
+                    try_times_connect: Union[int, float, None] = None,
+                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                    cursor: Any = None) -> Union[int, tuple, list]:
         # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         if try_times_connect is None:
@@ -92,7 +100,7 @@ class SqlClient(BaseSqlClient):
             return ()
         return 0
 
-    def ping(self):
+    def ping(self) -> None:
         # psycopg2.connection没有ping
         self.set_connection()
 
@@ -118,7 +126,8 @@ class SqlClient(BaseSqlClient):
                 raise e
             return query
 
-    def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
+    def _before_query_and_get_cursor(self, fetchall: bool = True, dictionary: Optional[bool] = None
+                                     ) -> psycopg2.extensions.cursor:
         if fetchall and (self.dictionary if dictionary is None else dictionary):
             cursor_class = self.lib.extras.DictCursor
         else:
@@ -126,7 +135,7 @@ class SqlClient(BaseSqlClient):
         self.set_connection()
         return self.connection.cursor(cursor_factory=cursor_class)
 
-    def _query_log_text(self, query, args, cursor=None):
+    def _query_log_text(self, query: str, args: Any, cursor: Any = None) -> str:
         try:
             return 'formatted_query: {}'.format(self.format(query, args, True, cursor))
         except Exception as e:

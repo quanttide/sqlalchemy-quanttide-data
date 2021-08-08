@@ -2,29 +2,36 @@
 
 import time
 import re
+from typing import Optional, Union, Iterable, Collection, Any
 
 import cx_Oracle
 
-from sql_client.base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient
 
 
 class SqlClient(BaseSqlClient):
     lib = cx_Oracle
 
-    def __init__(self, host=None, port=1521, user=None, password=None, database=None, charset='utf8', autocommit=True,
-                 connect_now=True, log=True, table=None, statement_save_data='INSERT INTO', dictionary=False,
-                 escape_auto_format=False, escape_formatter='"{}"', empty_string_to_none=True, keep_args_as_dict=True,
-                 transform_formatter=True, try_times_connect=3, time_sleep_connect=3, raise_error=False):
+    def __init__(self, host: Optional[str] = None, port: Union[int, str, None] = 1521, user: Optional[str] = None,
+                 password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = 'utf8',
+                 autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
+                 statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
+                 escape_formatter: str = '"{}"', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
+                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         # oracle如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # oracle无replace语句；insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
                          keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
 
-    def query(self, query, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False, keys=None,
-              commit=None, escape_auto_format=None, escape_formatter=None, empty_string_to_none=None,
-              keep_args_as_dict=None, transform_formatter=None, try_times_connect=None, time_sleep_connect=None,
-              raise_error=None):
+    def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+              not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
+              commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
+              escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
+              keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
+              try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
+              raise_error: Optional[bool] = None) -> Union[int, tuple, list]:
         # cx_Oracle.Cursor.execute不支持%s，但支持:1, :2, ...
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
         # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为False；
@@ -87,21 +94,22 @@ class SqlClient(BaseSqlClient):
         return result
 
     @property
-    def autocommit(self):
+    def autocommit(self) -> bool:
         return self._autocommit
 
     @autocommit.setter
-    def autocommit(self, value):
+    def autocommit(self, value: bool):
         if hasattr(self, 'connection') and value != self._autocommit:
             self.connection.autocommit = value
         self._autocommit = value
 
-    def connect(self):
+    def connect(self) -> None:
         self.connection = self.lib.connect(user=self.user, password=self.password, dsn='{}:{}/{}'.format(
             self.host, self.port, self.database), encoding=self.charset)
         self.connection.autocommit = self._autocommit
 
-    def execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None, cursor=None):
+    def execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+                many: bool = False, commit: Optional[bool] = None, cursor: Any = None) -> Union[int, tuple, list]:
         # cx_Oracle.Cursor.execute不能传入None
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         ori_cursor = cursor
@@ -129,7 +137,8 @@ class SqlClient(BaseSqlClient):
                 raise e
             return query
 
-    def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
+    def _before_query_and_get_cursor(self, fetchall: bool = True, dictionary: Optional[bool] = None
+                                     ) -> cx_Oracle.Cursor:
         self.set_connection()
         if fetchall and (self.dictionary if dictionary is None else dictionary):
             cursor = self.connection.cursor()
@@ -137,8 +146,10 @@ class SqlClient(BaseSqlClient):
             return cursor
         return self.connection.cursor()
 
-    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, empty_string_to_none=None,
-                  try_times_connect=None, time_sleep_connect=None, raise_error=None, kwargs=None):
+    def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,
+                  commit: Optional[bool] = None, empty_string_to_none: Optional[bool] = None,
+                  try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
+                  raise_error: Optional[bool] = None, kwargs: Optional[dict] = None) -> Union[int, tuple, list]:
         # cx_Oracle.Cursor.callproc支持kwargs
         # 执行存储过程
         # name: 存储过程名
@@ -192,9 +203,11 @@ class SqlClient(BaseSqlClient):
             return ()
         return 0
 
-    def call_func(self, name, return_type, args=(), fetchall=True, dictionary=None, commit=None,
-                  empty_string_to_none=None, try_times_connect=None, time_sleep_connect=None, raise_error=None,
-                  kwargs=None):
+    def call_func(self, name: str, return_type: type, args: Iterable = (), fetchall: bool = True,
+                  dictionary: Optional[bool] = None, commit: Optional[bool] = None,
+                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                  kwargs: Optional[dict] = None) -> Union[int, tuple, list]:
         # 执行函数
         # name: 函数名
         # return_type: 返回值的类型(必填)，参见：

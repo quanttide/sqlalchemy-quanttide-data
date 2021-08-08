@@ -4,18 +4,17 @@ import os
 import time
 import contextlib
 import re
-from collections import OrderedDict
-from inspect import isclass
-from typing import Optional, Union, Iterable, Collection, Any
+from typing import Optional, Union, Iterable, Collection, List, Any
 
 import tablib
 from sqlalchemy.pool.impl import NullPool
 from sqlalchemy import exc
 from sqlalchemy.sql.expression import text
-from sqlalchemy.engine import create_engine
+from sqlalchemy.engine import create_engine, RootTransaction, Transaction
 from sqlalchemy.inspection import inspect
 
-from sql_client.base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient
+from ._records import RecordCollection, Record
 
 
 class SqlClient(BaseSqlClient):
@@ -125,7 +124,7 @@ class SqlClient(BaseSqlClient):
               keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
               try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
               raise_error: Optional[bool] = None, origin_result: Optional[bool] = None, dataset: Optional[bool] = None
-              ) -> Union[int, tuple, list]:
+              ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # sqlalchemy无cursor；sqlalchemy不支持位置参数；增加origin_result, dataset参数
         # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
         # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为True；
@@ -184,11 +183,18 @@ class SqlClient(BaseSqlClient):
                 result += temp_result
         return result
 
-    def select_to_try(self, table=None, num=1, key_fields='id', extra_fields='', tried=0, tried_after=1,
-                      tried_field='is_tried', finished=None, finished_field='is_finished', plus_1_field='',
-                      dictionary=None, autocommit_after=None, select_where=None, select_extra='', update_set=None,
-                      set_extra='', update_where=None, update_extra='', try_times_connect=None, time_sleep_connect=None,
-                      raise_error=None, origin_result=None, dataset=None):
+    def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
+                      key_fields: Union[str, Iterable[str]] = 'id', extra_fields: Union[str, Iterable[str], None] = '',
+                      tried: Union[int, str, None] = 0, tried_after: Union[int, str, None] = 1,
+                      tried_field: Optional[str] = 'is_tried', finished: Union[int, str, None] = None,
+                      finished_field: Optional[str] = 'is_finished', plus_1_field: Optional[str] = '',
+                      dictionary: Optional[bool] = None, autocommit_after: Optional[bool] = None,
+                      select_where: Optional[str] = None, select_extra: str = '', update_set: Optional[str] = None,
+                      set_extra: Optional[str] = '', update_where: Optional[str] = None, update_extra: str = '',
+                      try_times_connect: Union[int, float, None] = None,
+                      time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                      origin_result: Optional[bool] = None, dataset: Optional[bool] = None
+                      ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # sqlalchemy事务使用不同；增加origin_result, dataset参数
         # key_fields: update一句where部分使用, extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
         # finished_field: select一句 where finished_field=finished，finished设为None则取消
@@ -248,7 +254,7 @@ class SqlClient(BaseSqlClient):
             self.autocommit = autocommit_after
         return result
 
-    def close(self, try_close=True):
+    def close(self, try_close: bool = True) -> None:
         if try_close:
             try:
                 self.connection.close()
@@ -265,11 +271,11 @@ class SqlClient(BaseSqlClient):
             self.engine.dispose()
 
     @property
-    def autocommit(self):
+    def autocommit(self) -> bool:
         return self._autocommit
 
     @autocommit.setter
-    def autocommit(self, value):
+    def autocommit(self, value: bool):
         if hasattr(self, 'connection') and value != self._autocommit:
             isolation_level = 'AUTOCOMMIT' if value else self.connection.default_isolation_level
             self.engine.update_execution_options(isolation_level=isolation_level)
@@ -286,7 +292,7 @@ class SqlClient(BaseSqlClient):
         except Exception:
             transaction.rollback()
 
-    def begin(self):
+    def begin(self) -> Union[RootTransaction, Transaction]:
         self.temp_autocommit = self._autocommit
         self.autocommit = False
         self.set_connection()
@@ -294,7 +300,7 @@ class SqlClient(BaseSqlClient):
         self._transactions.append(transaction)
         return transaction
 
-    def commit(self, transaction=None):
+    def commit(self, transaction=None) -> None:
         if transaction is not None:
             transaction.commit()
         elif self._transactions:
@@ -303,7 +309,7 @@ class SqlClient(BaseSqlClient):
             self.autocommit = self.temp_autocommit
             self.temp_autocommit = None
 
-    def rollback(self, transaction=None):
+    def rollback(self, transaction=None) -> None:
         if transaction is not None:
             transaction.rollback()
         elif self._transactions:
@@ -312,12 +318,15 @@ class SqlClient(BaseSqlClient):
             self.autocommit = self.temp_autocommit
             self.temp_autocommit = None
 
-    def connect(self):
+    def connect(self) -> None:
         self.connection = self.engine.connect()
 
-    def try_execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None,
-                    try_times_connect=None, time_sleep_connect=None, raise_error=None, cursor=None, origin_result=None,
-                    dataset=None):
+    def try_execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+                    many: bool = False, commit: Optional[bool] = None,
+                    try_times_connect: Union[int, float, None] = None,
+                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                    cursor: None = None, origin_result: Optional[bool] = None, dataset: Optional[bool] = None
+                    ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # sqlalchemy无cursor；增加origin_result, dataset参数
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         if try_times_connect is None:
@@ -358,8 +367,10 @@ class SqlClient(BaseSqlClient):
             return ()
         return 0
 
-    def execute(self, query, args=None, fetchall=True, dictionary=None, many=False, commit=None, cursor=None,
-                origin_result=None, dataset=None):
+    def execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+                many: bool = False, commit: Optional[bool] = None, cursor: None = None,
+                origin_result: Optional[bool] = None, dataset: Optional[bool] = None
+                ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # 覆盖调用逻辑；增加origin_result, dataset参数
         # fetchall=False: return成功执行语句数(many模式按数据条数)
         if dictionary is None:
@@ -391,7 +402,7 @@ class SqlClient(BaseSqlClient):
             return result.all(as_dict=True)
         return result
 
-    def ping(self):
+    def ping(self) -> None:
         # sqlalchemy没有ping
         self.set_connection()
 
@@ -406,12 +417,15 @@ class SqlClient(BaseSqlClient):
                 raise e
             return query
 
-    def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
+    def _before_query_and_get_cursor(self, fetchall: bool = True, dictionary: Optional[bool] = None):
         # sqlalchemy无cursor，不使用该方法，替代以直接调用set_connection
         raise NotImplementedError
 
-    def call_proc(self, name, args=(), fetchall=True, dictionary=None, commit=None, empty_string_to_none=None,
-                  try_times_connect=None, time_sleep_connect=None, raise_error=None, origin_result=None, dataset=None):
+    def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,
+                  commit: Optional[bool] = None, empty_string_to_none: Optional[bool] = None,
+                  try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
+                  raise_error: Optional[bool] = None, origin_result: Optional[bool] = None,
+                  dataset: Optional[bool] = None) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # sqlalchemy以直接execute执行存储过程；增加origin_result, dataset参数
         # 执行存储过程
         # name: 存储过程名
@@ -421,263 +435,24 @@ class SqlClient(BaseSqlClient):
         return self.query(query, None, fetchall, dictionary, True, False, commit, try_times_connect, time_sleep_connect,
                           raise_error, origin_result=origin_result, dataset=dataset)
 
-    def query_file(self, path, args=None, fetchall=True, dictionary=None, not_one_by_one=True, auto_format=False,
-                   commit=None, try_times_connect=None, time_sleep_connect=None, raise_error=None,
-                   empty_string_to_none=None, keep_args_as_dict=None, escape_auto_format=None, escape_formatter=None,
-                   origin_result=None, dataset=None):
+    def query_file(self, path: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+                   not_one_by_one: bool = True, auto_format: bool = False,
+                   keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
+                   escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
+                   empty_string_to_none: Optional[bool] = None, keep_args_as_dict: Optional[bool] = None,
+                   transform_formatter: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                   origin_result: Optional[bool] = None, dataset: Optional[bool] = None
+                   ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         with open(path) as f:
             query = f.read()
-        return self.query(query, args, fetchall, dictionary, not_one_by_one, auto_format, commit, try_times_connect,
-                          time_sleep_connect, raise_error, empty_string_to_none, keep_args_as_dict, escape_auto_format,
-                          escape_formatter, origin_result, dataset)
+        return self.query(query, args, fetchall, dictionary, not_one_by_one, auto_format, keys, commit,
+                          escape_auto_format, escape_formatter, empty_string_to_none, keep_args_as_dict,
+                          transform_formatter, try_times_connect, time_sleep_connect, raise_error, origin_result,
+                          dataset)
 
-    def get_table_names(self):
+    def get_table_names(self) -> List[str]:
         """Returns a list of table names for the connected database."""
 
         # Setup SQLAlchemy for Database inspection.
         return inspect(self.engine).get_table_names()
-
-
-class Record(object):
-    """A row, from a query, from a database."""
-    __slots__ = ('_keys', '_values')
-
-    def __init__(self, keys, values):
-        self._keys = keys
-        self._values = values
-
-        # Ensure that lengths match properly.
-        assert len(self._keys) == len(self._values)
-
-    def keys(self):
-        """Returns the list of column names from the query."""
-        return self._keys
-
-    def values(self):
-        """Returns the list of values from the query."""
-        return self._values
-
-    def __repr__(self):
-        return '<Record {}>'.format(self.export('json')[1:-1])
-
-    def __getitem__(self, key):
-        # Support for index-based lookup.
-        if isinstance(key, int):
-            return self.values()[key]
-
-        # Support for string-based lookup.
-        if key in self.keys():
-            i = self.keys().index(key)
-            if self.keys().count(key) > 1:
-                raise KeyError("Record contains multiple '{}' fields.".format(key))
-            return self.values()[i]
-
-        raise KeyError("Record contains no '{}' field.".format(key))
-
-    def __getattr__(self, key):
-        try:
-            return self[key]
-        except KeyError as e:
-            raise AttributeError(e)
-
-    def __dir__(self):
-        standard = dir(super(Record, self))
-        # Merge standard attrs with generated ones (from column names).
-        return sorted(standard + [str(k) for k in self.keys()])
-
-    def get(self, key, default=None):
-        """Returns the value for a given key, or default."""
-        try:
-            return self[key]
-        except KeyError:
-            return default
-
-    def as_dict(self, ordered=False):
-        """Returns the row as a dictionary, as ordered."""
-        items = zip(self.keys(), self.values())
-
-        return OrderedDict(items) if ordered else dict(items)
-
-    @property
-    def dataset(self):
-        """A Tablib Dataset containing the row."""
-        data = tablib.Dataset()
-        data.headers = self.keys()
-
-        row = _reduce_datetimes(self.values())
-        data.append(row)
-
-        return data
-
-    def export(self, format, **kwargs):
-        """Exports the row to the given format."""
-        return self.dataset.export(format, **kwargs)
-
-
-class RecordCollection(object):
-    """A set of excellent Records from a query."""
-
-    def __init__(self, rows):
-        self._rows = rows
-        self._all_rows = []
-        self.pending = True
-
-    def __repr__(self):
-        return '<RecordCollection size={} pending={}>'.format(len(self), self.pending)
-
-    def __iter__(self):
-        """Iterate over all rows, consuming the underlying generator
-        only when necessary."""
-        i = 0
-        while True:
-            # Other code may have iterated between yields,
-            # so always check the cache.
-            if i < len(self):
-                yield self[i]
-            else:
-                # Throws StopIteration when done.
-                # Prevent StopIteration bubbling from generator, following https://www.python.org/dev/peps/pep-0479/
-                try:
-                    yield next(self)
-                except StopIteration:
-                    return
-            i += 1
-
-    def next(self):
-        return self.__next__()
-
-    def __next__(self):
-        try:
-            nextrow = next(self._rows)
-            self._all_rows.append(nextrow)
-            return nextrow
-        except StopIteration:
-            self.pending = False
-            raise StopIteration('RecordCollection contains no more rows.')
-
-    def __getitem__(self, key):
-        is_int = isinstance(key, int)
-
-        # Convert RecordCollection[1] into slice.
-        if is_int:
-            key = slice(key, key + 1)
-
-        while len(self) < key.stop or key.stop is None:
-            try:
-                next(self)
-            except StopIteration:
-                break
-
-        rows = self._all_rows[key]
-        if is_int:
-            return rows[0]
-        else:
-            return RecordCollection(iter(rows))
-
-    def __len__(self):
-        return len(self._all_rows)
-
-    def export(self, format, **kwargs):
-        """Export the RecordCollection to a given format (courtesy of Tablib)."""
-        return self.dataset.export(format, **kwargs)
-
-    @property
-    def dataset(self):
-        """A Tablib Dataset representation of the RecordCollection."""
-        # Create a new Tablib Dataset.
-        data = tablib.Dataset()
-
-        # If the RecordCollection is empty, just return the empty set
-        # Check number of rows by typecasting to list
-        if len(list(self)) == 0:
-            return data
-
-        # Set the column names as headers on Tablib Dataset.
-        first = self[0]
-
-        data.headers = first.keys()
-        for row in self.all():
-            row = _reduce_datetimes(row.values())
-            data.append(row)
-
-        return data
-
-    def all(self, as_dict=False, as_ordereddict=False):
-        """Returns a list of all rows for the RecordCollection. If they haven't
-        been fetched yet, consume the iterator and cache the results."""
-
-        # By calling list it calls the __iter__ method
-        rows = list(self)
-
-        if as_dict:
-            return [r.as_dict() for r in rows]
-        elif as_ordereddict:
-            return [r.as_dict(ordered=True) for r in rows]
-
-        return rows
-
-    def as_dict(self, ordered=False):
-        return self.all(as_dict=not ordered, as_ordereddict=ordered)
-
-    def first(self, default=None, as_dict=False, as_ordereddict=False):
-        """Returns a single record for the RecordCollection, or `default`. If
-        `default` is an instance or subclass of Exception, then raise it
-        instead of returning it."""
-
-        # Try to get a record, or return/raise default.
-        try:
-            record = self[0]
-        except IndexError:
-            if isexception(default):
-                raise default
-            return default
-
-        # Cast and return.
-        if as_dict:
-            return record.as_dict()
-        elif as_ordereddict:
-            return record.as_dict(ordered=True)
-        else:
-            return record
-
-    def one(self, default=None, as_dict=False, as_ordereddict=False):
-        """Returns a single record for the RecordCollection, ensuring that it
-        is the only record, or returns `default`. If `default` is an instance
-        or subclass of Exception, then raise it instead of returning it."""
-
-        # Ensure that we don't have more than one row.
-        try:
-            self[1]
-        except IndexError:
-            return self.first(default=default, as_dict=as_dict, as_ordereddict=as_ordereddict)
-        else:
-            raise ValueError('RecordCollection contained more than one row. '
-                             'Expects only one row when using '
-                             'RecordCollection.one')
-
-    def scalar(self, default=None):
-        """Returns the first column of the first row, or `default`."""
-        row = self.one()
-        return row[0] if row else default
-
-
-def isexception(obj):
-    """Given an object, return a boolean indicating whether it is an instance
-    or subclass of :py:class:`Exception`.
-    """
-    if isinstance(obj, Exception):
-        return True
-    if isclass(obj) and issubclass(obj, Exception):
-        return True
-    return False
-
-
-def _reduce_datetimes(row):
-    """Receives a row, converts datetimes to strings."""
-
-    row = list(row)
-
-    for i in range(len(row)):
-        if hasattr(row[i], 'isoformat'):
-            row[i] = row[i].isoformat()
-    return tuple(row)
