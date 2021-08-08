@@ -118,16 +118,16 @@ class SqlClient(BaseSqlClient):
             cursor.close()
         return result
 
-    def format(self, query, args, raise_error=True):
+    def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
         # cx_Oracle.Connection没有literal和escape，暂不借鉴mysql实现
         try:
             if args is None:
                 return query
             return query % args if '%' in query else query.format(args)
         except Exception as e:
-            if raise_error:
+            if raise_error or raise_error is None and self.raise_error:
                 raise e
-            return
+            return query
 
     def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
         self.set_connection()

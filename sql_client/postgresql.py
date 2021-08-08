@@ -96,7 +96,7 @@ class SqlClient(BaseSqlClient):
         # psycopg2.connection没有ping
         self.set_connection()
 
-    def format(self, query, args, raise_error=True, cursor=None):
+    def format(self, query: str, args: Any, raise_error: Optional[bool] = None, cursor: Any = None) -> str:
         # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
         try:
             if args is None:
@@ -114,9 +114,9 @@ class SqlClient(BaseSqlClient):
                 cursor.close()
             return formatted_query
         except Exception as e:
-            if raise_error:
+            if raise_error or raise_error is None and self.raise_error:
                 raise e
-            return
+            return query
 
     def _before_query_and_get_cursor(self, fetchall=True, dictionary=None):
         if fetchall and (self.dictionary if dictionary is None else dictionary):

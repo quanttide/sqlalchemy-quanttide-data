@@ -483,7 +483,7 @@ class SqlClient(object):
             # AttributeError: 'NoneType' object has no attribute 'ping'
             self.try_connect()
 
-    def format(self, query: str, args: Any, raise_error: Optional[bool] = True) -> Optional[str]:
+    def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
         try:
             if args is None:
                 return query
@@ -493,9 +493,9 @@ class SqlClient(object):
             new_args = tuple(map(self.connection.literal, args))
             return query % new_args if '%' in query else query.format(*new_args)
         except Exception as e:
-            if raise_error:
+            if raise_error or raise_error is None and self.raise_error:
                 raise e
-            return
+            return query
 
     def _before_query_and_get_cursor(self, fetchall: bool = True, dictionary: Optional[bool] = None) -> Any:
         if fetchall and (self.dictionary if dictionary is None else dictionary):
