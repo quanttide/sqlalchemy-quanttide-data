@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from inspect import isclass
 
+import tablib
 
 class Record(object):
     """A row, from a query, from a database."""
