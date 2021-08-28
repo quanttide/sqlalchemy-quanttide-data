@@ -12,34 +12,32 @@ SQL数据库的Python操作库的封装。
 
 - 第一种：安装对应模块依赖：（推荐）
 
-Tips：1. 如需一次性安装多个，在中括号内用逗号隔开即可。2. 支持别名：mysql->mysqlclient，pgsql->psycopg2，psycopg2->psycopg2，psycopg2-binary->psycopg2-binary。
-
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[sqlalchemy]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git sqlalchemy tablib
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[sqlalchemy,mysqlclient]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git sqlalchemy tablib mysqlclient
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[mysqlclient]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git mysqlclient
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[pymysql]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git pymysql
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[postgresql]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git psycopg2
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[sqlserver]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git pymssql
 ```
 
 ```shell
-pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git[oracle]
+pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git cx_Oracle
 ```
 
 - 第二种：仅安装本库，自行安装依赖：
