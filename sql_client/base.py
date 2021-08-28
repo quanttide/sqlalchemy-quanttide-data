@@ -24,17 +24,17 @@ class SqlClient(object):
                  transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         if host is None:
-            host = os.environ.get('HOST') or os.environ.get('host')
+            host = os.environ.get('DB_HOST')
         if port is None:
-            port = os.environ.get('PORT') or os.environ.get('port')
+            port = os.environ.get('DB_PORT')
         if user is None:
-            user = os.environ.get('USER') or os.environ.get('user')
+            user = os.environ.get('DB_USER')
         if password is None:
-            password = os.environ.get('PASSWORD') or os.environ.get('password')
+            password = os.environ.get('DB_PASSWORD')
         if database is None:
-            database = os.environ.get('DATABASE') or os.environ.get('database')
+            database = os.environ.get('DB_DATABASE')
         if table is None:
-            table = os.environ.get('TABLE') or os.environ.get('table')
+            table = os.environ.get('DB_TABLE')
         if port is None and ':' in host:
             host, port = host.rsplit(':', 1)
         self.host = host

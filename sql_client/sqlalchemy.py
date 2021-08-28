@@ -39,8 +39,8 @@ class SqlClient(BaseSqlClient):
         if engine_kwargs is None:
             engine_kwargs = {}
         if dialect is None:
-            dialect = os.environ.get('DIALECT') or os.environ.get('dialect') or os.environ.get(
-                'DATABASE_URL') or os.environ.get('database_url')
+            dialect = os.environ.get('DB_DIALECT') or os.environ.get('DATABASE_URL') or os.environ.get(
+                'DB_DATABASE_URL') or os.environ.get('DB_URL')
         if ':' in dialect:  # 完整url模式
             url = dialect
             dialect, tail = url.split('://', 1)
@@ -60,25 +60,25 @@ class SqlClient(BaseSqlClient):
                 dialect, driver = dialect.split('+', 1)
             else:
                 if driver is None:
-                    driver = os.environ.get('DRIVER') or os.environ.get('driver')
+                    driver = os.environ.get('DB_DRIVER')
                 if driver is not None:
                     driver = driver.lower()
             if dialect == 'sqlserver':
                 dialect = 'mssql'
             if host is None:
-                host = os.environ.get('HOST') or os.environ.get('host')
+                host = os.environ.get('DB_HOST')
             if port is None:
-                port = os.environ.get('PORT') or os.environ.get('port')
+                port = os.environ.get('DB_PORT')
             if user is None:
-                user = os.environ.get('USER') or os.environ.get('user')
+                user = os.environ.get('DB_USER')
             if user is not None:
                 user = user.replace('%', '%25').replace(':', '%3A').replace('/', '%2F')
             if password is None:
-                password = os.environ.get('PASSWORD') or os.environ.get('password')
+                password = os.environ.get('DB_PASSWORD')
             if password is not None:
                 password = password.replace('%', '%25').replace('@', '%40')
             if database is None:
-                database = os.environ.get('DATABASE') or os.environ.get('database')
+                database = os.environ.get('DB_DATABASE')
             if database is not None and ('?' in database or '@' in database):
                 engine_kwargs.setdefault('connect_args', {})['database'] = database
             url = '{}{}://{}{}{}{}'.format(
