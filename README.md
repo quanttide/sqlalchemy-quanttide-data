@@ -84,10 +84,17 @@ from sql_client.sqlalchemy import SqlClient
 
 实例化SqlClient类（以postgresql为例），建议放于全局变量以复用连接。
 
+数据库信息相关未传入时会自动从以下相应环境变量中读取：DB_DIALECT, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, DB_TABLE
+
 ```python
 DB = SqlClient(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
 # 亦可传入table='...'参数作为全局的默认表
 # 如希望query方法返回的结果默认为字典格式，可传入dictionary=True
+```
+
+```python
+DB = SqlClient()
+# 数据库信息置于环境变量中
 ```
 
 ### 数据库操作
