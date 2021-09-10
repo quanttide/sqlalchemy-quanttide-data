@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
-from typing import Optional, Union
+from typing import Union, Optional
 
 import pymysql
 
-from .base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient, Paramstyle
 
 
 class SqlClient(BaseSqlClient):
@@ -14,9 +14,9 @@ class SqlClient(BaseSqlClient):
                  password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = 'utf8mb4',
                  autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: str = 'REPLACE', dictionary: bool = False, escape_auto_format: bool = True,
-                 escape_formatter: str = '`{}`', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
-                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 escape_formatter: str = '`{}`', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
+                 to_paramstyle: Optional[Paramstyle] = Paramstyle.format, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
+                         args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)

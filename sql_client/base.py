@@ -3,12 +3,37 @@
 import os
 import time
 import contextlib
+import enum
 import re
-from typing import Optional, Union, Iterable, Collection, Any
+import itertools
+from typing import Any, Union, Optional, Tuple, Iterable, Collection, Sequence
+
+
+class Paramstyle(enum.IntEnum):
+    pyformat = 0
+    format = 1
+    named = 2
+    numeric = 3
+    qmark = 4
 
 
 class SqlClient(object):
     lib = None
+    _pattern = {Paramstyle.pyformat: re.compile(r'(?<![%\\])%\(([\w$]+)\)s'),
+                Paramstyle.format: re.compile(r'(?<![%\\])%s'),
+                Paramstyle.named: re.compile(r'(?<![:\w$\\]):([a-zA-Z_$][\w$]*)(?!:)'),
+                Paramstyle.numeric: re.compile(r'(?<![:\d\\]):(\d+)(?!:)'),
+                Paramstyle.qmark: re.compile(r'(?<!\\)\?')}
+    _pattern_esc = {Paramstyle.pyformat: re.compile(r'[%\\](%\([\w$]+\)s)'),
+                    Paramstyle.format: re.compile(r'[%\\](%s)'),
+                    Paramstyle.named: re.compile(r'\\(:[a-zA-Z_$][\w$]*)(?!:)'),
+                    Paramstyle.numeric: re.compile(r'\\(:\d+)(?!:)'),
+                    Paramstyle.qmark: re.compile(r'\\(\?)')}
+    _repl = {Paramstyle.pyformat: r'%(\1)s',
+             Paramstyle.format: '%s',
+             Paramstyle.named: r':\1',
+             Paramstyle.numeric: None,
+             Paramstyle.qmark: '?'}
 
     # lib模块的以下属性被下列方法使用：
     # lib.ProgrammingError: close
@@ -20,8 +45,8 @@ class SqlClient(object):
                  password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = None,
                  autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
-                 escape_formatter: str = '{}', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
-                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 escape_formatter: str = '{}', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
+                 to_paramstyle: Optional[Paramstyle] = Paramstyle.format, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         if host is None:
             host = os.environ.get('DB_HOST')
@@ -51,8 +76,8 @@ class SqlClient(object):
         self.escape_auto_format = escape_auto_format
         self.escape_formatter = escape_formatter  # sqlserver使用[]，不能只记一个字符
         self.empty_string_to_none = empty_string_to_none
-        self.keep_args_as_dict = keep_args_as_dict
-        self.transform_formatter = transform_formatter
+        self.args_to_dict = args_to_dict
+        self.to_paramstyle = to_paramstyle
         self.try_times_connect = try_times_connect
         self.time_sleep_connect = time_sleep_connect
         self.raise_error = raise_error
@@ -67,58 +92,81 @@ class SqlClient(object):
               not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
               commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
               escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
-              keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
+              args_to_dict: Union[bool, None, tuple] = (), to_paramstyle: Union[Paramstyle, None, tuple] = (),
               try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
               raise_error: Optional[bool] = None) -> Union[int, tuple, list]:
-        # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为False；
-        #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
+        # args 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
+        # auto_format=True: 注意此时query会被format一次; args_to_dict视为False;
+        #                   首条记录需为dict(not_one_by_one=False时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        args, is_multiple = self.standardize_args(args, None, empty_string_to_none,
-                                                  not auto_format and keys is None and keep_args_as_dict, True)
-        if not args:
+        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=(): 读取默认配置
+        if args and not hasattr(args, '__getitem__') and hasattr(args, '__iter__'):  # set, Generator, range
+            args = tuple(args)
+        if not args and args not in (0, ''):
             return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
                                     time_sleep_connect, raise_error)
         if escape_auto_format is None:
             escape_auto_format = self.escape_auto_format
+        if auto_format:
+            args_to_dict = False
+        from_paramstyle = ()
+        if isinstance(to_paramstyle, tuple):
+            to_paramstyle = self.to_paramstyle
+        if to_paramstyle is not None:
+            args_to_dict = to_paramstyle in (Paramstyle.pyformat, Paramstyle.named)
+            from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
+        if keys is None:
+            if args_to_dict is False:
+                if isinstance(from_paramstyle, tuple):
+                    from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
+                if from_paramstyle in (Paramstyle.pyformat, Paramstyle.named, Paramstyle.numeric):
+                    keys = self._pattern[from_paramstyle].findall(query)
+            elif to_paramstyle in (Paramstyle.pyformat, Paramstyle.named) and from_paramstyle == Paramstyle.numeric:
+                keys = self._pattern[from_paramstyle].findall(query)
+        elif isinstance(keys, str):
+            keys = tuple(key.strip() for key in keys.split(','))
+        nums = None
+        if to_paramstyle in (Paramstyle.format, Paramstyle.qmark) and from_paramstyle == Paramstyle.numeric:
+            nums = list(map(int, self._pattern[from_paramstyle].findall(query)))
+            if nums == sorted(nums):
+                nums = None
+        args, is_multiple, is_key_generated = self.standardize_args(args, None, empty_string_to_none, args_to_dict,
+                                                                    True, keys, nums)
+        if from_paramstyle is not None:
+            query = self.transform_paramstyle(query, to_paramstyle, from_paramstyle)
         if not is_multiple or not_one_by_one:  # 执行一次
-            if auto_format or keys is not None:
+            if auto_format:
                 if escape_formatter is None:
                     escape_formatter = self.escape_formatter
                 if keys is None:
                     arg = args[0] if is_multiple else args
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                        arg, dict) else '', ','.join(('%s',) * len(arg)))
-                elif isinstance(keys, str):
-                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
-                                                                keys.split(',')) if escape_auto_format else keys),
-                                         ','.join(('%s',) * (keys.count(',') + 1)))
+                    query = query.format('({})'.format(','.join(map(escape_formatter.format if escape_auto_format else
+                                                                    str, arg)))
+                                         if isinstance(arg, dict) and not is_key_generated else '',
+                                         ','.join(self.paramstyle_formatter(arg, to_paramstyle)))
                 else:
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in keys) if escape_auto_format else keys)), ','.join(('%s',) * len(keys)))
+                    query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
+                                                                if escape_auto_format else keys)),
+                                         ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
             return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
                                     time_sleep_connect, raise_error)
         # 依次执行
         ori_query = query
         result = [] if fetchall else 0
-        if auto_format or keys is not None:
+        if auto_format:
             if escape_formatter is None:
                 escape_formatter = self.escape_formatter
             if keys is not None:
-                if isinstance(keys, str):
-                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
-                                                                keys.split(',')) if escape_auto_format else keys),
-                                         ','.join(('%s',) * (keys.count(',') + 1)))
-                else:
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in keys) if escape_auto_format else keys)), ','.join(('%s',) * len(keys)))
+                query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
+                                                            if escape_auto_format else keys)),
+                                     ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
         cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         for arg in args:
             if auto_format and keys is None:
-                query = ori_query.format('({})'.format(','.join((escape_formatter.format(
-                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                    arg, dict) else '', ','.join(('%s',) * len(arg)))
+                query = ori_query.format('({})'.format(','.join(map(escape_formatter.format if escape_auto_format else
+                                                                    str, arg)))
+                                         if isinstance(arg, dict) and not is_key_generated else '',
+                                         ','.join(self.paramstyle_formatter(arg, to_paramstyle)))
             temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
                                            time_sleep_connect, raise_error, cursor)
             if fetchall:
@@ -136,8 +184,8 @@ class SqlClient(object):
                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
                   ) -> Union[int, tuple, list]:
         # data_list 支持单条记录: list/tuple/dict，或多条记录: list/tuple/set[list/tuple/dict]
-        # 首条记录需为dict（one_by_one=True时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
-        # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录（有log）
+        # 首条记录需为dict(one_by_one=True时所有记录均需为dict)，或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
+        # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录(有log)
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
         if not args and args not in (0, ''):
             return 0
@@ -145,7 +193,7 @@ class SqlClient(object):
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
             ' {}'.format(extra) if extra is not None else '')
         return self.query(query, args, False, False, not_one_by_one, True, keys, commit, escape_auto_format,
-                          escape_formatter, empty_string_to_none, False, False, try_times_connect, time_sleep_connect,
+                          escape_formatter, empty_string_to_none, False, (), try_times_connect, time_sleep_connect,
                           raise_error)
 
     def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
@@ -183,7 +231,7 @@ class SqlClient(object):
         query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
                                                    select_where, select_extra, ' limit {}'.format(num) if num else '')
         self.begin()
-        result = self.query(query, fetchall=True, dictionary=dictionary, commit=False, transform_formatter=False,
+        result = self.query(query, fetchall=True, dictionary=dictionary, commit=False,
                             try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
                             raise_error=raise_error)
         if not result:
@@ -206,9 +254,8 @@ class SqlClient(object):
             tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
             plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
                                                      update_extra)
-        is_success = self.query(query, fetchall=False, commit=False, transform_formatter=False,
-                                try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
-                                raise_error=raise_error)
+        is_success = self.query(query, fetchall=False, commit=False, try_times_connect=try_times_connect,
+                                time_sleep_connect=time_sleep_connect, raise_error=raise_error)
         if is_success:
             self.commit()
         else:
@@ -218,15 +265,15 @@ class SqlClient(object):
             self.autocommit = autocommit_after
         return result
 
-    def finish(self, result: Optional[Iterable], table: Optional[str] = None, key_fields: Optional[str] = '',
-               finished: Union[int, str] = 1, finished_field: str = 'is_finished', commit: bool = True,
-               update_where: Optional[str] = None, update_extra: str = '',
-               try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
-               raise_error: Optional[bool] = None) -> int:
+    def finish(self, result: Optional[Iterable], table: Optional[str] = None,
+               key_fields: Union[str, Iterable[str], None] = '', finished: Union[int, str] = 1,
+               finished_field: str = 'is_finished', commit: bool = True, update_where: Optional[str] = None,
+               update_extra: str = '', try_times_connect: Union[int, float, None] = None,
+               time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
         # 对key_fields对应result的记录，set finished_field=finished
         # key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
         # update_where: 不为None则替换update一句的where部分
-        result = self.standardize_args(result, True, False, True, False)
+        result = self.standardize_args(result, True, False, None, False)
         if not result:
             return 0
         if table is None:
@@ -411,64 +458,6 @@ class SqlClient(object):
             cursor.close()
         return result
 
-    def standardize_args(self, args: Any, to_multiple: Optional[bool] = None,
-                         empty_string_to_none: Optional[bool] = None, keep_args_as_dict: Optional[bool] = None,
-                         get_is_multiple: bool = False) -> Any:
-        if not args and args not in (0, ''):
-            return args if not get_is_multiple else (args, False)
-        if not hasattr(args, '__getitem__'):
-            if hasattr(args, '__iter__'):  # set, Generator, range
-                args = tuple(args)
-                if not args:
-                    return args if not get_is_multiple else (args, False)
-            else:  # int, etc.
-                args = (args,)
-        elif isinstance(args, str):
-            args = (args,)
-        # else: dict, list, tuple, dataset/row, recordcollection/record
-        if to_multiple is None:
-            to_multiple = not isinstance(args, dict) and not isinstance(args[0], str) and (
-                    hasattr(args[0], '__getitem__') or hasattr(args[0], '__iter__'))
-        if empty_string_to_none is None:
-            empty_string_to_none = self.empty_string_to_none
-        if keep_args_as_dict is None:
-            keep_args_as_dict = self.keep_args_as_dict
-        if not to_multiple:
-            if isinstance(args, dict):
-                if not keep_args_as_dict:
-                    args = tuple(each if each != '' else None for each in args.values()
-                                 ) if empty_string_to_none else tuple(args.values())
-                elif empty_string_to_none:
-                    args = {key: value if value != '' else None for key, value in args.items()}
-            elif empty_string_to_none:
-                args = tuple(each if each != '' else None for each in args)
-        else:
-            if isinstance(args, dict):
-                if keep_args_as_dict:
-                    args = ({key: value if value != '' else None for key, value in args.items()},
-                            ) if empty_string_to_none else (args,)
-                else:
-                    args = (tuple(each if each != '' else None for each in args.values()),
-                            ) if empty_string_to_none else (tuple(args.values()),)
-            elif isinstance(args[0], dict):
-                if not keep_args_as_dict:
-                    args = tuple(tuple(e if e != '' else None for e in each.values()) for each in args
-                                 ) if empty_string_to_none else tuple(tuple(each.values()) for each in args)
-                elif empty_string_to_none:
-                    args = tuple({key: value if value != '' else None for key, value in each.items()} for each in args)
-            elif isinstance(args[0], str):
-                args = (tuple(each if each != '' else None for each in args),) if empty_string_to_none else (args,)
-            elif not hasattr(args[0], '__getitem__'):
-                if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
-                    # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
-                    args = tuple(tuple(e if e != '' else None for e in each) for each in args
-                                 ) if empty_string_to_none else tuple(tuple(each) for each in args)
-                else:  # list[int, etc.]
-                    args = (tuple(each if each != '' else None for each in args),) if empty_string_to_none else (args,)
-            elif empty_string_to_none:
-                args = tuple(tuple(e if e != '' else None for e in each) for each in args)
-        return args if not get_is_multiple else (args, to_multiple)
-
     def ping(self) -> None:
         try:
             self.connection.ping()
@@ -482,6 +471,163 @@ class SqlClient(object):
             # AttributeError: 'SqlClient' object has no attribute 'connection'
             # AttributeError: 'NoneType' object has no attribute 'ping'
             self.try_connect()
+
+    def standardize_args(self, args: Any, to_multiple: Optional[bool] = None,
+                         empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, None, tuple] = (),
+                         get_info: bool = False, keys: Optional[Iterable[str]] = None,
+                         nums: Optional[Iterable[int]] = None
+                         ) -> Union[Sequence, dict, None, Tuple[Union[Sequence, dict], bool, bool]]:
+        # get_info=True: 返回值除了标准化的变量以外还有: 是否multiple, 字典key是否为生成的
+        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=(): 读取默认配置
+        # args_to_dict=False且args为dict形式时，keys需不为None(query方法已预先处理)
+        # nums: from_paramstyle=Paramstyle.numeric且to_paramstyle为Paramstyle.format或Paramstyle.qmark且通配符乱序时，传入通配符数字列表
+        if args is None:
+            return None if not get_info else (None, False, False)
+        if not args and args not in (0, ''):
+            return () if not get_info else ((), False, False)
+        if not hasattr(args, '__getitem__'):
+            if hasattr(args, '__iter__'):  # set, Generator, range
+                args = tuple(args)
+                if not args:
+                    return args if not get_info else (args, False, False)
+            else:  # int, etc.
+                args = (args,)
+        elif isinstance(args, str):
+            args = (args,)
+        # else: dict, list, tuple, dataset/row, recordcollection/record
+        if to_multiple is None:  # 检测是否multiple
+            to_multiple = not isinstance(args, dict) and not isinstance(args[0], str) and (
+                    hasattr(args[0], '__getitem__') or hasattr(args[0], '__iter__'))
+        if isinstance(args_to_dict, tuple):
+            args_to_dict = self.args_to_dict
+        if empty_string_to_none is None:
+            empty_string_to_none = self.empty_string_to_none
+        is_key_generated = False
+        if not to_multiple:
+            if isinstance(args, dict):
+                if args_to_dict is False:
+                    args = tuple(args[key] if args[key] != '' else None for key in keys
+                                 ) if empty_string_to_none else tuple(map(args.__getitem__, keys))
+                elif empty_string_to_none:
+                    args = {key: value if value != '' else None for key, value in args.items()}
+            else:
+                if args_to_dict:
+                    if keys is None:
+                        keys = tuple(map(str, range(1, len(args) + 1)))
+                        is_key_generated = True
+                    args = {key: value if value != '' else None for key, value in zip(keys, args)
+                            } if empty_string_to_none else dict(zip(keys, args))
+                elif nums is not None:
+                    args = tuple(args[num] if args[num] != '' else None for num in nums
+                                 ) if empty_string_to_none else tuple(map(args.__getitem__, nums))
+                elif empty_string_to_none:
+                    args = tuple(each if each != '' else None for each in args)
+        else:
+            if isinstance(args, dict):
+                if args_to_dict is False:
+                    args = (tuple(args[key] if args[key] != '' else None for key in keys),
+                            ) if empty_string_to_none else (tuple(map(args.__getitem__, keys)),)
+                else:
+                    args = ({key: value if value != '' else None for key, value in args.items()},
+                            ) if empty_string_to_none else (args,)
+            elif isinstance(args[0], dict):
+                if args_to_dict is False:
+                    args = tuple(tuple(each[key] if each[key] != '' else None for key in keys) for each in args
+                                 ) if empty_string_to_none else tuple(
+                        tuple(map(each.__getitem__, keys)) for each in args)
+                elif empty_string_to_none:
+                    args = tuple({key: value if value != '' else None for key, value in each.items()} for each in args)
+            else:
+                if args_to_dict:
+                    if keys is None:
+                        keys = tuple(map(str, range(1, len(args) + 1)))
+                        is_key_generated = True
+                    if isinstance(args[0], str):
+                        args = ({key: value if value != '' else None for key, value in zip(keys, args)},
+                                ) if empty_string_to_none else (dict(zip(keys, args)),)
+                    elif not hasattr(args[0], '__getitem__'):
+                        if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
+                            # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                            args = tuple({key: value if value != '' else None for key, value in zip(keys, each)}
+                                         for each in args) if empty_string_to_none else tuple(
+                                dict(zip(keys, each)) for each in args)
+                        else:  # list[int, etc.]
+                            args = ({key: value if value != '' else None for key, value in zip(keys, args)},
+                                    ) if empty_string_to_none else (dict(zip(keys, args)),)
+                    else:
+                        args = tuple({key: value if value != '' else None for key, value in zip(keys, each)} for each in
+                                     args) if empty_string_to_none else tuple(dict(zip(keys, each)) for each in args)
+                elif nums is not None:
+                    if isinstance(args[0], str):
+                        args = (tuple(args[num] if args[num] != '' else None for num in nums),
+                                ) if empty_string_to_none else (tuple(map(args.__getitem__, nums)),)
+                    elif not hasattr(args[0], '__getitem__'):
+                        if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
+                            # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                            args = tuple(tuple(each[num] if each[num] != '' else None for num in nums) for each in
+                                         map(tuple, args)) if empty_string_to_none else tuple(
+                                tuple(map(each.__getitem__, nums)) for each in map(tuple, args))
+                        else:  # list[int, etc.]
+                            args = (tuple(args[num] if args[num] != '' else None for num in nums),
+                                    ) if empty_string_to_none else (tuple(map(args.__getitem__, nums)),)
+                    else:
+                        args = tuple(tuple(each[num] if each[num] != '' else None for num in nums) for each in args
+                                     ) if empty_string_to_none else tuple(
+                            tuple(map(each.__getitem__, nums)) for each in args)
+                elif isinstance(args[0], str):
+                    args = (tuple(each if each != '' else None for each in args),) if empty_string_to_none else (args,)
+                elif not hasattr(args[0], '__getitem__'):
+                    if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
+                        # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                        args = tuple(tuple(e if e != '' else None for e in each) for each in args
+                                     ) if empty_string_to_none else tuple(tuple(each) for each in args)
+                    else:  # list[int, etc.]
+                        args = (tuple(each if each != '' else None for each in args),) if empty_string_to_none else (
+                            args,)
+                elif empty_string_to_none:
+                    args = tuple(tuple(e if e != '' else None for e in each) for each in args)
+        return args if not get_info else (args, to_multiple, is_key_generated)
+
+    @classmethod
+    def judge_paramstyle(cls, query: str, first: Optional[Paramstyle] = None) -> Optional[Paramstyle]:
+        if first is not None and cls._pattern[first].search(query):
+            return first
+        for from_paramstyle, from_pattern in cls._pattern.items():
+            if from_paramstyle != first and from_pattern.search(query):
+                return from_paramstyle
+        else:
+            return None
+
+    @classmethod
+    def transform_paramstyle(cls, query: str, to_paramstyle: Paramstyle,
+                             from_paramstyle: Union[Paramstyle, None, tuple] = ()) -> str:
+        # args需预先转换为dict或list形式（与to_paramstyle相对应的那一种）
+        # from_paramstyle=None: 无paramstyle; from_paramstyle=(): 未传入该参数
+        if isinstance(from_paramstyle, tuple):
+            from_paramstyle = cls.judge_paramstyle(query, to_paramstyle)
+        if from_paramstyle is None:
+            return query
+        if from_paramstyle != to_paramstyle:
+            if to_paramstyle == Paramstyle.numeric:
+                pos_count = itertools.count(1)
+                query = cls._pattern[from_paramstyle].sub(lambda m: str(next(pos_count)), query)
+            else:
+                query = cls._pattern[from_paramstyle].sub(cls._repl[to_paramstyle], query)
+        return cls._pattern_esc[from_paramstyle].sub(r'\1', query)
+
+    @staticmethod
+    def paramstyle_formatter(arg: Union[Sequence, dict], paramstyle: Optional[Paramstyle] = None) -> Iterable[str]:
+        if paramstyle is None or paramstyle == Paramstyle.format:
+            return ('%s',) * len(arg)
+        if paramstyle == Paramstyle.pyformat:
+            return map('%({})s'.format, arg)
+        if paramstyle == Paramstyle.named:
+            return map(':{}'.format, arg)
+        if paramstyle == Paramstyle.numeric:
+            return map(':{}'.format, range(1, len(arg) + 1))
+        if paramstyle == Paramstyle.qmark:
+            return ('?',) * len(arg)
+        raise ValueError(paramstyle)
 
     def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
         try:

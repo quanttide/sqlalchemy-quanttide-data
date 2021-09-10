@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import time
-import re
-from typing import Optional, Union, Iterable, Collection, Any
+from typing import Any, Union, Optional, Iterable
 
 import cx_Oracle
 
-from .base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient, Paramstyle
 
 
 class SqlClient(BaseSqlClient):
@@ -16,82 +15,14 @@ class SqlClient(BaseSqlClient):
                  password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = 'utf8',
                  autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
-                 escape_formatter: str = '"{}"', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
-                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 escape_formatter: str = '"{}"', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
+                 to_paramstyle: Optional[Paramstyle] = Paramstyle.numeric, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         # oracle如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # oracle无replace语句；insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
-
-    def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
-              not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
-              commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
-              escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
-              keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
-              try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
-              raise_error: Optional[bool] = None) -> Union[int, tuple, list]:
-        # cx_Oracle.Cursor.execute不支持%s，但支持:1, :2, ...
-        # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为False；
-        #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
-        # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        args, is_multiple = self.standardize_args(args, None, empty_string_to_none,
-                                                  not auto_format and keys is None and keep_args_as_dict, True)
-        if not args:
-            return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
-                                    time_sleep_connect, raise_error)
-        if escape_auto_format is None:
-            escape_auto_format = self.escape_auto_format
-        if not is_multiple or not_one_by_one:  # 执行一次
-            if auto_format or keys is not None:
-                if escape_formatter is None:
-                    escape_formatter = self.escape_formatter
-                if keys is None:
-                    arg = args[0] if is_multiple else args
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                        arg, dict) else '', ','.join(':{}'.format(i) for i in range(1, len(args) + 1)))
-                elif isinstance(keys, str):
-                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
-                                                                keys.split(',')) if escape_auto_format else keys),
-                                         ','.join(':{}'.format(i) for i in range(1, keys.count(',') + 2)))
-                else:
-                    query = query.format('({})'.format(','.join((escape_formatter.format(key) for key in keys)
-                                                                if escape_auto_format else keys)),
-                                         ','.join(':{}'.format(i) for i in range(1, len(keys) + 1)))
-            return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
-                                    time_sleep_connect, raise_error)
-        # 依次执行
-        ori_query = query
-        result = [] if fetchall else 0
-        if auto_format or keys is not None:
-            if escape_formatter is None:
-                escape_formatter = self.escape_formatter
-            if keys is not None:
-                if isinstance(keys, str):
-                    query = query.format('({})'.format(','.join(escape_formatter.format(key.strip()) for key in
-                                                                keys.split(',')) if escape_auto_format else keys),
-                                         ','.join(':{}'.format(i) for i in range(1, keys.count(',') + 2)))
-                else:
-                    query = query.format('({})'.format(','.join((escape_formatter.format(key) for key in keys)
-                                                                if escape_auto_format else keys)),
-                                         ','.join(':{}'.format(i) for i in range(1, len(keys) + 1)))
-        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
-        for arg in args:
-            if auto_format and keys is None:
-                query = ori_query.format('({})'.format(','.join((escape_formatter.format(
-                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                    arg, dict) else '', ','.join(':{}'.format(i) for i in range(1, len(args) + 1)))
-            temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
-                                           time_sleep_connect, raise_error, cursor)
-            if fetchall:
-                result.append(temp_result)
-            else:
-                result += temp_result
-        cursor.close()
-        return result
+                         args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)
 
     @property
     def autocommit(self) -> bool:

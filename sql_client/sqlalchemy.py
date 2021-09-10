@@ -3,22 +3,17 @@
 import os
 import time
 import contextlib
-import re
-from typing import Optional, Union, Iterable, Collection, List, Any
+from typing import Any, Union, Optional, List, Iterable, Collection
 
 import tablib
-from sqlalchemy.pool.impl import NullPool
-from sqlalchemy import exc
-from sqlalchemy.sql.expression import text
-from sqlalchemy.engine import create_engine, RootTransaction, Transaction
-from sqlalchemy.inspection import inspect
+import sqlalchemy
 
-from .base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient, Paramstyle
 from ._records import RecordCollection, Record
 
 
 class SqlClient(BaseSqlClient):
-    lib = exc
+    lib = sqlalchemy.exc
 
     def __init__(self, dialect: Optional[str] = None, driver: Optional[str] = None, host: Optional[str] = None,
                  port: Union[int, str, None] = None, user: Optional[str] = None, password: Optional[str] = None,
@@ -26,10 +21,11 @@ class SqlClient(BaseSqlClient):
                  connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: Optional[str] = None, dictionary: bool = False,
                  escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
-                 empty_string_to_none: bool = True, keep_args_as_dict: bool = True, transform_formatter: bool = True,
-                 try_times_connect: Union[int, float] = 3, time_sleep_connect: Union[int, float] = 3,
-                 raise_error: bool = False, origin_result: bool = False, dataset: bool = False, is_pool: bool = False,
-                 pool_size: int = 1, engine_kwargs: Optional[dict] = None, **kwargs):
+                 empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
+                 to_paramstyle: Optional[Paramstyle] = Paramstyle.named, try_times_connect: Union[int, float] = 3,
+                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False, origin_result: bool = False,
+                 dataset: bool = False, is_pool: bool = False, pool_size: int = 1, engine_kwargs: Optional[dict] = None,
+                 **kwargs):
         # dialect也可输入完整url；或者将完整url存于环境变量：DATABASE_URL
         # 完整url格式：dialect[+driver]://user:password@host/dbname[?key=value..]
         # 对user和password影响sqlalchemy解析url的字符进行转义(sqlalchemy解析完url会对user和password解转义) (若从dialect或环境变量传入整个url，需提前转义好)
@@ -91,7 +87,7 @@ class SqlClient(BaseSqlClient):
         if is_pool:
             engine_kwargs['pool_size'] = pool_size
         else:
-            engine_kwargs['poolclass'] = NullPool
+            engine_kwargs['poolclass'] = sqlalchemy.pool.NullPool
         if charset == '':
             charset = {'mysql': 'utf8mb4', 'postgresql': None}.get(dialect, 'utf8')
         if charset is not None:
@@ -112,68 +108,91 @@ class SqlClient(BaseSqlClient):
         if escape_formatter is None:
             escape_formatter = {'mysql': '`{}`', 'postgresql': '"{}"', 'oracle': '"{}"', 'sqlite': '"{}"',
                                 'mssql': '[{}]'}.get(dialect, '{}')
-        self.engine = create_engine(url, **engine_kwargs)
+        self.engine = sqlalchemy.create_engine(url, **engine_kwargs)
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
+                         args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)
 
     def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
               not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
               commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
               escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
-              keep_args_as_dict: Optional[bool] = None, transform_formatter: Optional[bool] = None,
+              args_to_dict: Union[bool, None, tuple] = (), to_paramstyle: Union[Paramstyle, None, tuple] = (),
               try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
               raise_error: Optional[bool] = None, origin_result: Optional[bool] = None, dataset: Optional[bool] = None
               ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # sqlalchemy无cursor；sqlalchemy不支持位置参数；增加origin_result, dataset参数
-        # args 支持单条记录: list/tuple/dict 或多条记录: list/tuple/set[list/tuple/dict]
-        # auto_format=True或keys不为None: 注意此时query会被format一次；keep_args_as_dict强制视为True；
-        #                                首条记录需为dict（not_one_by_one=False时所有记录均需为dict），或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
+        # args 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
+        # auto_format=True: 注意此时query会被format一次; args_to_dict视为False;
+        #                   首条记录需为dict(not_one_by_one=False时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        args, is_multiple = self.standardize_args(args, None, empty_string_to_none,
-                                                  auto_format or keys is not None or keep_args_as_dict, True)
-        if not args:
+        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=(): 读取默认配置
+        if args and not hasattr(args, '__getitem__') and hasattr(args, '__iter__'):  # set, Generator, range
+            args = tuple(args)
+        if not args and args not in (0, ''):
             return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
                                     time_sleep_connect, raise_error, origin_result=origin_result, dataset=dataset)
         if escape_auto_format is None:
             escape_auto_format = self.escape_auto_format
+        if auto_format:
+            args_to_dict = False
+        from_paramstyle = ()
+        if isinstance(to_paramstyle, tuple):
+            to_paramstyle = self.to_paramstyle
+        if to_paramstyle is not None:
+            args_to_dict = to_paramstyle in (Paramstyle.pyformat, Paramstyle.named)
+            from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
+        if keys is None:
+            if args_to_dict is False:
+                if isinstance(from_paramstyle, tuple):
+                    from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
+                if from_paramstyle in (Paramstyle.pyformat, Paramstyle.named, Paramstyle.numeric):
+                    keys = self._pattern[from_paramstyle].findall(query)
+            elif to_paramstyle in (Paramstyle.pyformat, Paramstyle.named) and from_paramstyle == Paramstyle.numeric:
+                keys = self._pattern[from_paramstyle].findall(query)
+        elif isinstance(keys, str):
+            keys = tuple(key.strip() for key in keys.split(','))
+        nums = None
+        if to_paramstyle in (Paramstyle.format, Paramstyle.qmark) and from_paramstyle == Paramstyle.numeric:
+            nums = list(map(int, self._pattern[from_paramstyle].findall(query)))
+            if nums == sorted(nums):
+                nums = None
+        args, is_multiple, is_key_generated = self.standardize_args(args, None, empty_string_to_none, args_to_dict,
+                                                                    True, keys, nums)
+        if from_paramstyle is not None:
+            query = self.transform_paramstyle(query, to_paramstyle, from_paramstyle)
         if not is_multiple or not_one_by_one:  # 执行一次
-            if auto_format or keys is not None:
+            if auto_format:
                 if escape_formatter is None:
                     escape_formatter = self.escape_formatter
                 if keys is None:
                     arg = args[0] if is_multiple else args
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                        arg, dict) else '', ','.join(map(':{}'.format, arg) if isinstance(arg, dict) else ('%s',) * len(
-                        arg)))
+                    query = query.format('({})'.format(','.join(map(escape_formatter.format if escape_auto_format else
+                                                                    str, arg)))
+                                         if isinstance(arg, dict) and not is_key_generated else '',
+                                         ','.join(self.paramstyle_formatter(arg, to_paramstyle)))
                 else:
-                    if isinstance(keys, str):
-                        keys = tuple(key.strip() for key in keys.split(','))
-                    query = query.format('({})'.format(','.join((escape_formatter.format(
-                        key) for key in keys) if escape_auto_format else keys)), ','.join(map(
-                        ':{}'.format, keys) if isinstance(args[0] if is_multiple else args, dict) else ('%s',) * len(
-                        keys)))
+                    query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
+                                                                if escape_auto_format else keys)),
+                                         ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
             return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
                                     time_sleep_connect, raise_error, origin_result=origin_result, dataset=dataset)
         # 依次执行
         ori_query = query
         result = [] if fetchall else 0
-        if auto_format or keys is not None:
+        if auto_format:
             if escape_formatter is None:
                 escape_formatter = self.escape_formatter
             if keys is not None:
-                if isinstance(keys, str):
-                    keys = tuple(key.strip() for key in keys.split(','))
-                query = query.format('({})'.format(','.join((escape_formatter.format(
-                    key) for key in keys) if escape_auto_format else keys)), ','.join(map(
-                    ':{}'.format, keys) if isinstance(args[0], dict) else ('%s',) * len(keys)))
+                query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
+                                                            if escape_auto_format else keys)),
+                                     ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
         for arg in args:
             if auto_format and keys is None:
-                query = ori_query.format('({})'.format(','.join((escape_formatter.format(
-                    key) for key in arg) if escape_auto_format else map(str, arg))) if isinstance(
-                    arg, dict) else '', ','.join(map(':{}'.format, arg) if isinstance(arg, dict) else ('%s',) * len(
-                    arg)))
+                query = ori_query.format('({})'.format(','.join(map(escape_formatter.format if escape_auto_format else
+                                                                    str, arg)))
+                                         if isinstance(arg, dict) and not is_key_generated else '',
+                                         ','.join(self.paramstyle_formatter(arg, to_paramstyle)))
             temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
                                            time_sleep_connect, raise_error, origin_result=origin_result,
                                            dataset=dataset)
@@ -196,7 +215,8 @@ class SqlClient(BaseSqlClient):
                       origin_result: Optional[bool] = None, dataset: Optional[bool] = None
                       ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         # sqlalchemy事务使用不同；增加origin_result, dataset参数
-        # key_fields: update一句where部分使用, extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
+        # key_fields: update一句where部分使用
+        # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
         # finished_field: select一句 where finished_field=finished，finished设为None则取消
         # plus_1_field: update一句令其+=1
         # select_where: 不为None则替换select一句的where部分(为''时删除where)
@@ -219,7 +239,7 @@ class SqlClient(BaseSqlClient):
         query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
                                                    select_where, select_extra, ' limit {}'.format(num) if num else '')
         transaction = self.begin()
-        result = self.query(query, fetchall=True, dictionary=dictionary, commit=False, transform_formatter=False,
+        result = self.query(query, fetchall=True, dictionary=dictionary, commit=False,
                             try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
                             raise_error=raise_error, origin_result=origin_result, dataset=dataset)
         if not result:
@@ -242,9 +262,8 @@ class SqlClient(BaseSqlClient):
             tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
             plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
                                                      update_extra)
-        is_success = self.query(query, fetchall=False, commit=False, transform_formatter=False,
-                                try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
-                                raise_error=raise_error)
+        is_success = self.query(query, fetchall=False, commit=False, try_times_connect=try_times_connect,
+                                time_sleep_connect=time_sleep_connect, raise_error=raise_error)
         if is_success:
             self.commit(transaction)
         else:
@@ -292,7 +311,7 @@ class SqlClient(BaseSqlClient):
         except Exception:
             transaction.rollback()
 
-    def begin(self) -> Union[RootTransaction, Transaction]:
+    def begin(self) -> Union[sqlalchemy.engine.RootTransaction, sqlalchemy.engine.Transaction]:
         self.temp_autocommit = self._autocommit
         self.autocommit = False
         self.set_connection()
@@ -381,14 +400,14 @@ class SqlClient(BaseSqlClient):
             dataset = self.dataset
         self.set_connection()
         if args is None:
-            cursor = self.connection.execute(text(query))
+            cursor = self.connection.execute(sqlalchemy.text(query))
         elif not many:
             if isinstance(args, dict):
-                cursor = self.connection.execute(text(query), **args)
+                cursor = self.connection.execute(sqlalchemy.text(query), **args)
             else:
-                cursor = self.connection.execute(text(query % args))
+                cursor = self.connection.execute(sqlalchemy.text(query % args))
         else:
-            cursor = self.connection.execute(text(query), *args)
+            cursor = self.connection.execute(sqlalchemy.text(query), *args)
         if commit and not self._autocommit:
             self.commit()
         if not fetchall:
@@ -439,20 +458,20 @@ class SqlClient(BaseSqlClient):
                    not_one_by_one: bool = True, auto_format: bool = False,
                    keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
                    escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
-                   empty_string_to_none: Optional[bool] = None, keep_args_as_dict: Optional[bool] = None,
-                   transform_formatter: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                   empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, None, tuple] = (),
+                   to_paramstyle: Union[Paramstyle, None, tuple] = (),
+                   try_times_connect: Union[int, float, None] = None,
                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
                    origin_result: Optional[bool] = None, dataset: Optional[bool] = None
                    ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
         with open(path) as f:
             query = f.read()
         return self.query(query, args, fetchall, dictionary, not_one_by_one, auto_format, keys, commit,
-                          escape_auto_format, escape_formatter, empty_string_to_none, keep_args_as_dict,
-                          transform_formatter, try_times_connect, time_sleep_connect, raise_error, origin_result,
-                          dataset)
+                          escape_auto_format, escape_formatter, empty_string_to_none, args_to_dict, to_paramstyle,
+                          try_times_connect, time_sleep_connect, raise_error, origin_result, dataset)
 
     def get_table_names(self) -> List[str]:
         """Returns a list of table names for the connected database."""
 
         # Setup SQLAlchemy for Database inspection.
-        return inspect(self.engine).get_table_names()
+        return sqlalchemy.inspect(self.engine).get_table_names()

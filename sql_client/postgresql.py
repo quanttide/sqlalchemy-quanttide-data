@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import time
-from typing import Optional, Union, Any
+from typing import Any, Union, Optional
 
 import psycopg2.extras
 import psycopg2.extensions
 
-from .base import SqlClient as BaseSqlClient
+from .base import SqlClient as BaseSqlClient, Paramstyle
 
 
 class SqlClient(BaseSqlClient):
@@ -16,14 +16,14 @@ class SqlClient(BaseSqlClient):
                  password: Optional[str] = None, database: Optional[str] = None, charset: Optional[str] = None,
                  autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
-                 escape_formatter: str = '"{}"', empty_string_to_none: bool = True, keep_args_as_dict: bool = True,
-                 transform_formatter: bool = True, try_times_connect: Union[int, float] = 3,
+                 escape_formatter: str = '"{}"', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
+                 to_paramstyle: Optional[Paramstyle] = Paramstyle.format, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         # postgresql如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # postgresql无replace语句；insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
-                         keep_args_as_dict, transform_formatter, try_times_connect, time_sleep_connect, raise_error)
+                         args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)
 
     @property
     def autocommit(self) -> bool:
