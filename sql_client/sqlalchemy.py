@@ -204,12 +204,15 @@ class SqlClient(BaseSqlClient):
 
     def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
                       key_fields: Union[str, Iterable[str]] = 'id', extra_fields: Union[str, Iterable[str], None] = '',
-                      tried: Union[int, str, None] = 0, tried_after: Union[int, str, None] = 1,
-                      tried_field: Optional[str] = 'is_tried', finished: Union[int, str, None] = None,
-                      finished_field: Optional[str] = 'is_finished', plus_1_field: Optional[str] = '',
+                      tried_field: Optional[str] = None, tried: Union[int, str, None] = 'between',
+                      tried_min: Union[int, str, None] = 1, tried_max: Union[int, str, None] = 5,
+                      tried_after: Union[int, str, None] = '-', finished_field: Optional[str] = None,
+                      finished: Union[int, str, None] = 0, next_time_field: Optional[str] = None,
+                      next_time: Union[int, float, str, None] = None,
+                      next_time_after: Union[int, float, str, None] = '', lock: bool = True,
                       dictionary: Optional[bool] = None, autocommit_after: Optional[bool] = None,
-                      select_where: Optional[str] = None, select_extra: str = '', update_set: Optional[str] = None,
-                      set_extra: Optional[str] = '', update_where: Optional[str] = None, update_extra: str = '',
+                      select_where: Optional[str] = None, select_extra: str = '', set_extra: Optional[str] = '',
+                      update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                       try_times_connect: Union[int, float, None] = None,
                       time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
                       origin_result: Optional[bool] = None, dataset: Optional[bool] = None
@@ -217,8 +220,11 @@ class SqlClient(BaseSqlClient):
         # sqlalchemy事务使用不同；增加origin_result, dataset参数
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
-        # finished_field: select一句 where finished_field=finished，finished设为None则取消
-        # plus_1_field: update一句令其+=1
+        # tried: 默认值'between'表示取tried_min<=tried_field<=tried_max, 也可传入'>=0'等
+        # tried_after: 默认值'-'表示取tried_field当前值的相反数, 也可传入'+1'等
+        # next_time: 默认值None表示取当前timestamp整数部分, 如需多个条件, 可不填next_time_field而传入select_extra例如
+        #              ' and (<next_time_field> is null or <next_time_field> <= <time>)'
+        # next_time_after: 默认值空字符串表示不修改, 传入None则设为null
         # select_where: 不为None则替换select一句的where部分(为''时删除where)
         # update_set: 不为None则替换update一句的set部分
         # update_where: 不为None则替换update一句的where部分
@@ -229,15 +235,41 @@ class SqlClient(BaseSqlClient):
         if extra_fields is not None and not isinstance(extra_fields, str):
             extra_fields = ','.join(extra_fields)
         if select_where is None:
-            select_where = ' where {}={}{}'.format(tried_field, tried, '' if finished is None else ' and {}={}'.format(
-                finished_field, finished))
+            if not tried_field:
+                select_tried = ''
+            elif tried is None or tried == 'null':
+                select_tried = tried_field + ' is null'
+            elif tried == 'between':
+                select_tried = '{} between {} and {}'.format(tried_field, tried_min, tried_max)
+            elif isinstance(tried, str) and tried.startswith(('>', '=', '<')):
+                select_tried = tried_field + tried
+            else:
+                select_tried = '{}={}'.format(tried_field, tried)
+            if not finished_field:
+                select_finished = ''
+            elif finished is None or finished == 'null':
+                select_finished = finished_field + ' is null'
+            else:
+                select_finished = '{}={}'.format(finished_field, finished)
+            if not next_time_field:
+                select_next_time = ''
+            elif next_time is None:
+                select_next_time = '{}<={}'.format(next_time_field, int(time.time()))
+            elif next_time == 'null':
+                select_next_time = next_time_field + ' is null'
+            elif isinstance(next_time, str) and next_time.startswith(('>', '=', '<')):
+                select_next_time = next_time_field + next_time
+            else:
+                select_next_time = '{}<={}'.format(next_time_field, next_time)
+            select_where = ' where ' + ' and '.join(filter(None, (select_tried, select_finished, select_next_time)))
         elif select_where:
-            if not select_where.startswith(' where'):
-                select_where = ' where ' + select_where.lstrip(' ')
-            elif select_where.startswith('where'):
+            if select_where.startswith('where'):
                 select_where = ' ' + select_where
-        query = 'select {}{} from {}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
-                                                   select_where, select_extra, ' limit {}'.format(num) if num else '')
+            elif not select_where.startswith(' where'):
+                select_where = ' where ' + select_where.lstrip(' ')
+        query = 'select {}{} from {}{}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
+                                                     select_where, select_extra, ' limit {}'.format(num) if num else '',
+                                                     ' for update' if lock else '')
         transaction = self.begin()
         result = self.query(query, fetchall=True, dictionary=dictionary, commit=False,
                             try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
@@ -258,10 +290,25 @@ class SqlClient(BaseSqlClient):
             update_where = update_where[5:].lstrip(' ')
         elif update_where.startswith(' where'):
             update_where = update_where[6:].lstrip(' ')
-        query = 'update {} set {} where {}{}'.format(table, '{}{}'.format(' and '.join(filter(None, ('{}={}'.format(
-            tried_field, tried_after) if tried_after is not None and tried_after != tried else '', '{0}={0}+1'.format(
-            plus_1_field) if plus_1_field else ''))), set_extra) if update_set is None else update_set, update_where,
-                                                     update_extra)
+        if not tried_field or tried_after is None:
+            update_tried = ''
+        elif tried_after == '-':
+            update_tried = '{0}=-{0}'.format(tried_field)
+        elif tried_after == '+1':
+            update_tried = '{0}={0}+1'.format(tried_field)
+        elif tried_after == '-+1':
+            update_tried = '{0}=-{0}+1'.format(tried_field)
+        else:
+            update_tried = '{}={}'.format(tried_field, 'null' if tried_after is None else tried_after)
+        if not next_time_field or next_time_after == '':
+            update_next_time = ''
+        elif isinstance(next_time_after, (int, float)) and next_time_after < 10 ** 9:
+            update_next_time = '{}={}'.format(next_time_field, int(time.time()) + next_time_after)
+        else:
+            update_next_time = '{}={}'.format(next_time_field, 'null' if next_time_after is None else next_time_after)
+        query = 'update {} set {} where {}{}'.format(table, ' and '.join(filter(None, (update_tried, update_next_time)))
+                                                            + set_extra if update_set is None else update_set,
+                                                     update_where, update_extra)
         is_success = self.query(query, fetchall=False, commit=False, try_times_connect=try_times_connect,
                                 time_sleep_connect=time_sleep_connect, raise_error=raise_error)
         if is_success:

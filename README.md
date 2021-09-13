@@ -164,37 +164,35 @@ DB.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field
 
 #### 选取未处理的数据并标记处理中
 
-开启事务，选取一条is_tried=0的数据，将is_tried置为1（通过key_fields定位，建议传入主键），提交事务并返回key_fields + extra_fields的内容。（若选取不到符合条件数据或事务执行出错，则返回空数据）
+开启事务，选取一条或多条数据（默认加锁），update指定字段（通过key_fields定位记录，建议key_fields传入主键或唯一标识字段），提交事务并返回key_fields + extra_fields的内容。（若选取不到符合条件数据或事务执行出错，则返回空数据）
 
-**注意：需提前将事务隔离级别设为REPEATABLE READ。**（MySQL初始为REPEATABLE READ，但PostgreSQL初始不是）
-
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), tried=0, tried_after=1, finished=None(不启用), finished_field='is_finished'；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=''(不修改), lock=True；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 ```python
 data = DB.select_to_try('my_table', key_fields='field_1', extra_fields='field_2')
 ```
 
-#### 标记处理完成
+#### 标记处理结束
 
-通过result(第一个参数)与key_fields定位（建议传入主键）选取数据，将is_finished置为1，返回1(执行成功)或0(执行失败)。
+通过result(第一个参数)与key_fields定位（建议传入主键或唯一标识字段）选取数据，update指定字段，返回1(执行成功)或0(执行失败)。
 
 若result传入列表而不是字典，则必须传入key_fields参数。
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：finished=1, finished_field='is_finished'。
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值(针对成功情形)：tried=0, next_time='null'；3、针对失败情形，可使用fail_try方法，参数与end_try一致，仅默认值不同：tried='-+1'(取相反数加一), next_time=300(当前时间+300秒)。
 
 ```python
-DB.finish([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
+DB.end_try([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
 # 单条数据亦可不由列表包裹: DB.finish({'field_1': 1, 'field_2': 'a'}, 'my_table')
 ```
 
 ```python
-DB.finish([[1, 'a'], [2, 'b']], 'my_table', key_fields=['field_1', 'field_2'])
+DB.end_try([[1, 'a'], [2, 'b']], 'my_table', key_fields=['field_1', 'field_2'])
 # 亦可传入key_fields='field_1,field_2'
 # 单条数据亦可不由列表包裹: DB.finish([1, 'a'], 'my_table', key_fields=['field_1', 'field_2'])
 ```
 
 ```python
-DB.finish([[1], [2]], 'my_table', key_fields='field_1')
+DB.end_try([[1], [2]], 'my_table', key_fields='field_1')
 # 单条数据亦可不由列表包裹: DB.finish([1], 'my_table') 或 DB.finish(1, 'my_table')
 ```
 
