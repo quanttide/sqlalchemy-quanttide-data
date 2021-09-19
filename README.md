@@ -86,6 +86,8 @@ from sql_client.sqlalchemy import SqlClient
 
 数据库信息相关未传入时会自动从以下相应环境变量中读取：DB_DIALECT, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, DB_TABLE
 
+Tips：dialect：数据库类型，仅sql_client.sqlalchemy模块使用，支持：mysql, postgresql, sqlite, oracle, mssql(支持别名：sqlserver), firebird, sybase
+
 ```python
 DB = SqlClient(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
 # 亦可传入table='...'参数作为全局的默认表
