@@ -225,7 +225,7 @@ class SqlClient(object):
         if table is None:
             table = self.table
         if isinstance(key_fields, str):
-            key_fields_list = key_fields.split(',')
+            key_fields_list = [key.strip() for key in key_fields.split(',')]
         else:
             key_fields_list = key_fields
             key_fields = ','.join(key_fields)
@@ -368,7 +368,7 @@ class SqlClient(object):
         if not key_fields:
             key_fields = tuple(result[0].keys())
         elif isinstance(key_fields, str):
-            key_fields = key_fields.split(',')
+            key_fields = [key.strip() for key in key_fields.split(',')]
         args = []
         if not tried_field:
             update_tried = ''

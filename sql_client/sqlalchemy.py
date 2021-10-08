@@ -233,7 +233,7 @@ class SqlClient(BaseSqlClient):
         if table is None:
             table = self.table
         if isinstance(key_fields, str):
-            key_fields_list = key_fields.split(',')
+            key_fields_list = [key.strip() for key in key_fields.split(',')]
         else:
             key_fields_list = key_fields
             key_fields = ','.join(key_fields)
