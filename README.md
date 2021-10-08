@@ -82,20 +82,20 @@ from sql_client.sqlalchemy import SqlClient
 
 ### 建立实例(并自动连接)
 
-实例化SqlClient类（以postgresql为例），建议放于全局变量以复用连接。
+实例化SqlClient类。（以postgresql为例）
 
 数据库信息相关未传入时会自动从以下相应环境变量中读取：DB_DIALECT, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, DB_TABLE
 
 Tips：dialect：数据库类型，仅sql_client.sqlalchemy模块使用，支持：mysql, postgresql, sqlite, oracle, mssql(支持别名：sqlserver), firebird, sybase
 
 ```python
-DB = SqlClient(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
+db = SqlClient(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
 # 亦可传入table='...'参数作为全局的默认表
 # 如希望query方法返回的结果默认为字典格式，可传入dictionary=True
 ```
 
 ```python
-DB = SqlClient()
+db = SqlClient()
 # 数据库信息置于环境变量中
 ```
 
@@ -112,23 +112,23 @@ Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输�
 - 第一种：数据按表的字段顺序排好，则只需列表即可，无需字典：
 
 ```python
-DB.save_data([[1, 'a'], [2, 'b']], 'my_table')
-# 单条数据亦可不由列表包裹: DB.save_data([1, 'a'], 'my_table')
+db.save_data([[1, 'a'], [2, 'b']], 'my_table')
+# 单条数据亦可不由列表包裹: db.save_data([1, 'a'], 'my_table')
 ```
 
 - 第二种：自定义对应的字段，传入字典：
 
 ```python
-DB.save_data([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
-# 单条数据亦可不由列表包裹: DB.save_data({'field_1': 1, 'field_2': 'a'}, 'my_table')
+db.save_data([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
+# 单条数据亦可不由列表包裹: db.save_data({'field_1': 1, 'field_2': 'a'}, 'my_table')
 ```
 
 - 第三种：自定义对应的字段，传入列表：（需按key的顺序排好数据）
 
 ```python
-DB.save_data([['a', 1], ['b', 2]], 'my_table', keys=['field_2', 'field_1'])
+db.save_data([['a', 1], ['b', 2]], 'my_table', keys=['field_2', 'field_1'])
 # 亦可传入keys='field_2,field_1'
-# 单条数据亦可不由列表包裹: DB.save_data(['a', 1], 'my_table', keys=['field_2', 'field_1'])
+# 单条数据亦可不由列表包裹: db.save_data(['a', 1], 'my_table', keys=['field_2', 'field_1'])
 ```
 
 #### 查询数据/执行自定义SQL语句
@@ -140,38 +140,39 @@ DB.save_data([['a', 1], ['b', 2]], 'my_table', keys=['field_2', 'field_1'])
 可传入fetchall=False参数，屏蔽SQL语句的执行结果，return成功执行的数据条数。
 
 ```python
-DB.query('select * from my_table')
+db.query('select * from my_table')
 ```
 
 ```python
-DB.query('select field_1,field_2 from my_table')
+db.query('select field_1,field_2 from my_table')
 ```
 
 ```python
-DB.query('update my_table set field_2=%s where field_1=%s', ['a', 1])
+db.query('update my_table set field_2=%s where field_1=%s', ['a', 1])
 ```
 
 ```python
-DB.query('update my_table set field_2=%s where field_1=%s', [['a', 1], ['b', 2]], not_one_by_one=False)
+db.query('update my_table set field_2=%s where field_1=%s', [['a', 1], ['b', 2]], not_one_by_one=False)
 # 仅sql_client.sqlalchemy此种情况需传入not_one_by_one=False，以支持%s填充
 ```
 
 ```python
-DB.query('update my_table set field_2=:field_2 where field_1=:field_1', {'field_1': 1, 'field_2': 'a'})
+db.query('update my_table set field_2=:field_2 where field_1=:field_1', {'field_1': 1, 'field_2': 'a'})
 ```
 
 ```python
-DB.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}])
+db.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}])
 ```
 
 #### 选取未处理的数据并标记处理中
 
 开启事务，选取一条或多条数据（默认加锁），update指定字段（通过key_fields定位记录，建议key_fields传入主键或唯一标识字段），提交事务并返回key_fields + extra_fields的内容。（若选取不到符合条件数据或事务执行出错，则返回空数据）
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=''(不修改), lock=True；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=()(不修改), lock=True；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 ```python
-data = DB.select_to_try('my_table', key_fields='field_1', extra_fields='field_2')
+data = db.select_to_try('my_table', key_fields='field_1', extra_fields='field_2')
+# key_fields和extra_fields若为多个字段，传入'field_1,field_2'或['field_1', 'field_2']均可
 ```
 
 #### 标记处理结束
@@ -180,22 +181,22 @@ data = DB.select_to_try('my_table', key_fields='field_1', extra_fields='field_2'
 
 若result传入列表而不是字典，则必须传入key_fields参数。
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值(针对成功情形)：tried=0, next_time='null'；3、针对失败情形，可使用fail_try方法，参数与end_try一致，仅默认值不同：tried='-+1'(取相反数加一), next_time=300(当前时间+300秒)。
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值(针对成功情形)：tried=0, next_time='null'；3. 针对失败情形，可使用fail_try方法，参数与end_try一致，仅默认值不同：tried='-+1'(取相反数加一), next_time=300(当前时间+300秒)。
 
 ```python
-DB.end_try([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
-# 单条数据亦可不由列表包裹: DB.finish({'field_1': 1, 'field_2': 'a'}, 'my_table')
+db.end_try([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
+# 单条数据亦可不由列表包裹: db.end_try({'field_1': 1, 'field_2': 'a'}, 'my_table')
 ```
 
 ```python
-DB.end_try([[1, 'a'], [2, 'b']], 'my_table', key_fields=['field_1', 'field_2'])
+db.end_try([[1, 'a'], [2, 'b']], 'my_table', key_fields=['field_1', 'field_2'])
 # 亦可传入key_fields='field_1,field_2'
-# 单条数据亦可不由列表包裹: DB.finish([1, 'a'], 'my_table', key_fields=['field_1', 'field_2'])
+# 单条数据亦可不由列表包裹: db.end_try([1, 'a'], 'my_table', key_fields=['field_1', 'field_2'])
 ```
 
 ```python
-DB.end_try([[1], [2]], 'my_table', key_fields='field_1')
-# 单条数据亦可不由列表包裹: DB.finish([1], 'my_table') 或 DB.finish(1, 'my_table')
+db.end_try([[1], [2]], 'my_table', key_fields='field_1')
+# 单条数据亦可不由列表包裹: db.end_try([1], 'my_table') 或 db.end_try(1, 'my_table')
 ```
 
 ## 更新日志
