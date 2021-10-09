@@ -46,9 +46,11 @@ pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git
 pip install git+https://e.coding.net/quanttide/serverless-bigdata/sql-client.git
 ```
 
-Tips：腾讯云云函数已内置依赖：[](https://cloud.tencent.com/document/product/583/55592)
+Tips：
 
-​	包含：mysqlclient, PyMySQL, psycopg2-binary（import名仍为psycopg2，只是从pip角度为与psycopg2不相关的两个包）
+1. 腾讯云云函数已内置依赖：[](https://cloud.tencent.com/document/product/583/55592)
+
+   包含：mysqlclient, PyMySQL, psycopg2-binary（import名仍为psycopg2，只是从pip角度为与psycopg2不相关的两个包）
 
 ### 依赖
 
@@ -86,7 +88,9 @@ from sql_client.sqlalchemy import SqlClient
 
 数据库信息相关未传入时会自动从以下相应环境变量中读取：DB_DIALECT, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE, DB_TABLE
 
-Tips：dialect：数据库类型，仅sql_client.sqlalchemy模块使用，支持：mysql, postgresql, sqlite, oracle, mssql(支持别名：sqlserver), firebird, sybase
+Tips：
+
+1. dialect：数据库类型，仅sql_client.sqlalchemy模块使用，支持：mysql, postgresql, sqlite, oracle, mssql(支持别名：sqlserver), firebird, sybase
 
 ```python
 db = SqlClient(dialect='postgresql', host='...', port=..., user='...', password='...', database='...')
@@ -107,7 +111,10 @@ db = SqlClient()
 
 前提：数据库内已建好表（以my_table为例），建议使用可视化工具操作，如Navicat。
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. MySQL若希望使用replace语句而不是insert语句，可传入statement='replace'参数（或置于第三个参数的位置）。
+Tips：
+
+1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table
+2. MySQL若希望使用replace语句而不是insert语句，可传入statement='replace'参数（或置于第三个参数的位置）
 
 - 第一种：数据按表的字段顺序排好，则只需列表即可，无需字典：
 
@@ -168,10 +175,15 @@ db.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field
 
 开启事务，选取一条或多条数据（默认加锁），update指定字段（通过key_fields定位记录，建议key_fields传入主键或唯一标识字段），提交事务并返回key_fields + extra_fields的内容。（若选取不到符合条件数据或事务执行出错，则返回空数据）
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=()(不修改), lock=True；3. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出。（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
+Tips：
+
+1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table
+2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=()(不修改), lock=True
+3. tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否
+4. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
 ```python
-data = db.select_to_try('my_table', key_fields='field_1', extra_fields='field_2')
+data = db.select_to_try('my_table', key_fields='field_1', extra_fields='field_2', tried_field='round_num', next_time_field='next_time')
 # key_fields和extra_fields若为多个字段，传入'field_1,field_2'或['field_1', 'field_2']均可
 ```
 
@@ -185,21 +197,25 @@ data = db.select_to_try('my_table', key_fields='field_1', extra_fields='field_2'
 
 针对提前取消处理的情形，可使用cancel_try方法，参数和逻辑与end_try一致，仅默认值不同：tried='-'(取相反数，即恢复原状)。
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值(针对成功情形)：tried=0, next_time='null'。
+Tips：
+
+1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table
+2. 其它主要参数默认值：tried=0, next_time='null'
+3. tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否
 
 ```python
-db.end_try([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
+db.end_try([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table', tried_field='round_num', next_time_field='next_time')
 # 单条数据亦可不由列表包裹: db.end_try({'field_1': 1, 'field_2': 'a'}, 'my_table')
 ```
 
 ```python
-db.end_try([[1, 'a'], [2, 'b']], 'my_table', key_fields=['field_1', 'field_2'])
+db.end_try([[1, 'a'], [2, 'b']], 'my_table', key_fields=['field_1', 'field_2'], tried_field='round_num', next_time_field='next_time')
 # 亦可传入key_fields='field_1,field_2'
 # 单条数据亦可不由列表包裹: db.end_try([1, 'a'], 'my_table', key_fields=['field_1', 'field_2'])
 ```
 
 ```python
-db.end_try([[1], [2]], 'my_table', key_fields='field_1')
+db.end_try([[1], [2]], 'my_table', key_fields='field_1', tried_field='round_num', next_time_field='next_time')
 # 单条数据亦可不由列表包裹: db.end_try([1], 'my_table') 或 db.end_try(1, 'my_table')
 ```
 

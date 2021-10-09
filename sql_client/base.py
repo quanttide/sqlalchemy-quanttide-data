@@ -217,6 +217,7 @@ class SqlClient(object):
                       ) -> Union[int, tuple, list]:
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
+        # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
         # tried: 默认值'between'表示取tried_min<=tried_field<=tried_max, 也可传入'>=0'等(传入空元组()表示不限制),
         #        如需多个条件, 可传入空元组()并往select_extra传入例如' and (<tried_field> is null or <tried_field> <= <time>)'
         # tried_after: 默认值'-'表示取tried_field当前值的相反数, 也可传入'+1'等
@@ -364,6 +365,7 @@ class SqlClient(object):
                 empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                 time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
         # key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
+        # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
         # update_where: 不为None则替换update一句的where部分
         result = self.standardize_args(result, True, False, None, False)
         if not result:
