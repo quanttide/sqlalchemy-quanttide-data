@@ -181,7 +181,11 @@ data = db.select_to_try('my_table', key_fields='field_1', extra_fields='field_2'
 
 若result传入列表而不是字典，则必须传入key_fields参数。
 
-Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值(针对成功情形)：tried=0, next_time='null'；3. 针对失败情形，可使用fail_try方法，参数与end_try一致，仅默认值不同：tried='-+1'(取相反数加一), next_time=300(当前时间+300秒)。
+参数默认值为成功情形；针对失败情形，可使用fail_try方法，参数和逻辑与end_try一致，仅默认值不同：tried='-+1'(取相反数加一), next_time=300(当前时间+300秒)。
+
+针对提前取消处理的情形，可使用cancel_try方法，参数和逻辑与end_try一致，仅默认值不同：tried='-'(取相反数，即恢复原状)。
+
+Tips：1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table；2. 其它主要参数默认值(针对成功情形)：tried=0, next_time='null'。
 
 ```python
 db.end_try([{'field_1': 1, 'field_2': 'a'}, {'field_1': 2, 'field_2': 'b'}], 'my_table')
