@@ -439,6 +439,22 @@ class SqlClient(object):
                             next_time, commit, set_extra, update_set, update_where, update_extra, empty_string_to_none,
                             try_times_connect, time_sleep_connect, raise_error)
 
+    def cancel_try(self, result: Optional[Iterable], table: Optional[str] = None,
+                   key_fields: Union[str, Iterable[str], None] = None, tried_field: Optional[str] = None,
+                   tried: Union[int, str, None] = '-', finished_field: Optional[str] = None,
+                   finished: Union[int, str, None] = 0, next_time_field: Optional[str] = None,
+                   next_time: Union[int, float, str, None] = '=null', commit: bool = True,
+                   set_extra: Optional[str] = '', update_set: Optional[str] = None, update_where: Optional[str] = None,
+                   update_extra: str = '', empty_string_to_none: Optional[bool] = None,
+                   try_times_connect: Union[int, float, None] = None,
+                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
+        # 取消尝试, 恢复select_to_try以前的原状
+        # 复用end_try, 仅改变tried参数默认值
+        # finished_field, next_time_field建议不填写, 以保持原状
+        return self.end_try(result, table, key_fields, tried_field, tried, finished_field, finished, next_time_field,
+                            next_time, commit, set_extra, update_set, update_where, update_extra, empty_string_to_none,
+                            try_times_connect, time_sleep_connect, raise_error)
+
     def close(self, try_close: bool = True) -> None:
         if try_close:
             try:
