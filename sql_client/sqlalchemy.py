@@ -108,7 +108,9 @@ class SqlClient(BaseSqlClient):
         if escape_formatter is None:
             escape_formatter = {'mysql': '`{}`', 'postgresql': '"{}"', 'oracle': '"{}"', 'sqlite': '"{}"',
                                 'mssql': '[{}]'}.get(dialect, '{}')
-        self.engine = sqlalchemy.create_engine(url, **engine_kwargs)
+        self.url = url
+        self.engine_kwargs = engine_kwargs
+        self.create_engine()
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
                          args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)
@@ -426,6 +428,9 @@ class SqlClient(BaseSqlClient):
     def connect(self) -> None:
         self.connection = self.engine.connect()
 
+    def create_engine(self) -> None:
+        self.engine = sqlalchemy.create_engine(self.url, **self.engine_kwargs)
+
     def try_execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
                     many: bool = False, commit: Optional[bool] = None,
                     try_times_connect: Union[int, float, None] = None,
@@ -499,7 +504,7 @@ class SqlClient(BaseSqlClient):
         if not fetchall:
             return len(args) if many and hasattr(args, '__len__') else 1
         if origin_result:
-            return list(cursor)
+            return list(cursor) if cursor.returns_rows else []
         result = RecordCollection((Record(cursor.keys(), row) for row in cursor) if cursor.returns_rows else iter(()))
         if dataset:
             return result.dataset

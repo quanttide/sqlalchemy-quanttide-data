@@ -34,6 +34,11 @@ class SqlClient(object):
              Paramstyle.named: r':\1',
              Paramstyle.numeric: None,
              Paramstyle.qmark: '?'}
+    _repl_format = {Paramstyle.pyformat: r'%({})s',
+                    Paramstyle.format: None,
+                    Paramstyle.named: r':{}',
+                    Paramstyle.numeric: r':{}',
+                    Paramstyle.qmark: None}
 
     # lib模块的以下属性被下列方法使用：
     # lib.ProgrammingError: close
@@ -745,9 +750,11 @@ class SqlClient(object):
         if from_paramstyle is None:
             return query
         if from_paramstyle != to_paramstyle:
-            if to_paramstyle == Paramstyle.numeric:
+            if to_paramstyle == Paramstyle.numeric or to_paramstyle in (
+                    Paramstyle.pyformat, Paramstyle.named) and from_paramstyle in (Paramstyle.format, Paramstyle.qmark):
                 pos_count = itertools.count(1)
-                query = cls._pattern[from_paramstyle].sub(lambda m: str(next(pos_count)), query)
+                query = cls._pattern[from_paramstyle].sub(
+                    lambda m: cls._repl_format[to_paramstyle].format(str(next(pos_count))), query)
             else:
                 query = cls._pattern[from_paramstyle].sub(cls._repl[to_paramstyle], query)
         return cls._pattern_esc[from_paramstyle].sub(r'\1', query)
