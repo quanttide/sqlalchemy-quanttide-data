@@ -134,7 +134,10 @@ class SqlClient(object):
                 nums = None
         args, is_multiple, is_key_generated = self.standardize_args(args, None, empty_string_to_none, args_to_dict,
                                                                     True, keys, nums)
-        if from_paramstyle is not None:
+        if from_paramstyle is None:
+            for pattern in self._pattern_esc.values():
+                query = pattern.sub(r'\1', query)
+        else:
             query = self.transform_paramstyle(query, to_paramstyle, from_paramstyle)
         if not is_multiple or not_one_by_one:  # 执行一次
             if auto_format:
