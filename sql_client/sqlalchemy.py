@@ -138,16 +138,13 @@ class SqlClient(BaseSqlClient):
             escape_auto_format = self.escape_auto_format
         if auto_format:
             args_to_dict = False
-        from_paramstyle = ()
         if isinstance(to_paramstyle, tuple):
             to_paramstyle = self.to_paramstyle
         if to_paramstyle is not None:
             args_to_dict = to_paramstyle in (Paramstyle.pyformat, Paramstyle.named)
-            from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
+        from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
         if keys is None:
             if args_to_dict is False:
-                if isinstance(from_paramstyle, tuple):
-                    from_paramstyle = self.judge_paramstyle(query, to_paramstyle)
                 if from_paramstyle in (Paramstyle.pyformat, Paramstyle.named, Paramstyle.numeric):
                     keys = self._pattern[from_paramstyle].findall(query)
             elif to_paramstyle in (Paramstyle.pyformat, Paramstyle.named) and from_paramstyle == Paramstyle.numeric:
