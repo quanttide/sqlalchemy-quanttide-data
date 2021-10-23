@@ -200,7 +200,7 @@ data = db.select_to_try('my_table', key_fields='field_1', extra_fields='field_2'
 Tips：
 
 1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table
-2. 其它主要参数默认值：tried=0, next_time='null'
+2. 其它主要参数默认值：tried=0, next_time='=0'
 3. tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否
 
 ```python

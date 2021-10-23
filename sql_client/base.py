@@ -360,7 +360,7 @@ class SqlClient(object):
                 key_fields: Union[str, Iterable[str], None] = None, tried_field: Optional[str] = None,
                 tried: Union[int, str, None] = 0, finished_field: Optional[str] = None,
                 finished: Union[int, str, None] = 1, next_time_field: Optional[str] = None,
-                next_time: Union[int, float, str, None] = '=null', commit: bool = True, set_extra: Optional[str] = '',
+                next_time: Union[int, float, str, None] = '=0', commit: bool = True, set_extra: Optional[str] = '',
                 update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                 empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                 time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
@@ -445,10 +445,9 @@ class SqlClient(object):
                    key_fields: Union[str, Iterable[str], None] = None, tried_field: Optional[str] = None,
                    tried: Union[int, str, None] = '-', finished_field: Optional[str] = None,
                    finished: Union[int, str, None] = 0, next_time_field: Optional[str] = None,
-                   next_time: Union[int, float, str, None] = '=null', commit: bool = True,
-                   set_extra: Optional[str] = '', update_set: Optional[str] = None, update_where: Optional[str] = None,
-                   update_extra: str = '', empty_string_to_none: Optional[bool] = None,
-                   try_times_connect: Union[int, float, None] = None,
+                   next_time: Union[int, float, str, None] = '=0', commit: bool = True, set_extra: Optional[str] = '',
+                   update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
+                   empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
         # 取消尝试, 恢复select_to_try以前的原状
         # 复用end_try, 仅改变tried参数默认值
