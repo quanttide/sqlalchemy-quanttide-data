@@ -178,7 +178,7 @@ db.query('update my_table set field_2=:field_2 where field_1=:field_1', [{'field
 Tips：
 
 1. 若my_table已在建立实例时输入默认表，则以下无需输入my_table
-2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=()(不修改), lock=True
+2. 其它主要参数默认值：num=1(选取1条数据), key_fields='id', tried='between'(选取>=tried_min <=tried_max), tried_min=1, tried_max=5, tried_after='-'(取相反数), next_time=None(<=当前时间), next_time_after=()(不修改), lock=True
 3. tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否
 4. 可传入dictionary=True/False参数，控制结果以字典或列表格式输出（sql_client.sqlalchemy特有：传入dataset=True参数，结果以tablib.Dataset类输出）
 
