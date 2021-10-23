@@ -227,8 +227,8 @@ class SqlClient(BaseSqlClient):
         #        如需多个条件, 可传入空元组()并往select_extra传入例如' and (<tried_field> is null or <tried_field> <= <time>)'
         # tried_after: 默认值'-'表示取tried_field当前值的相反数, 也可传入'+1'等
         #              (传入空元组()表示不修改, 传入None则设为null, 传入''则根据empty_string_to_none决定是否转为null)
-        # next_time: 默认值None表示取当前timestamp整数部分, 传入空元组()表示不限制, 如需多个条件, 可传入空元组()并往select_extra传入例如
-        #            ' and (<next_time_field> is null or <next_time_field> <= <time>)'
+        # next_time: 默认值None表示取next_time_field<=当前timestamp整数部分(注意取不到为null的记录), 传入空元组()表示不限制, 如需多个条件,
+        #            可传入空元组()并往select_extra传入例如' and (<next_time_field> is null or <next_time_field> <= <time>)'
         # next_time_after: 默认值空元组()表示不修改, 传入None则设为null, 传入''则根据empty_string_to_none决定是否转为null
         # select_where: 不为None则替换select一句的where部分(为''时删除where)
         # update_set: 不为None则替换update一句的set部分
