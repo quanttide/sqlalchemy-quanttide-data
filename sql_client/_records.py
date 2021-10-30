@@ -140,6 +140,8 @@ class RecordCollection(object):
             return RecordCollection(iter(rows))
 
     def __len__(self):
+        if self.pending:
+            list(self)
         return len(self._all_rows)
 
     def export(self, format, **kwargs):
