@@ -141,7 +141,11 @@ class RecordCollection(object):
 
     def __len__(self):
         if self.pending:
-            list(self)
+            while True:
+                try:
+                    next(self)
+                except StopIteration:
+                    break
         return len(self._all_rows)
 
     def export(self, format, **kwargs):
