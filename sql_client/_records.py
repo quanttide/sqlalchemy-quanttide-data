@@ -141,6 +141,7 @@ class RecordCollection(object):
 
     def __len__(self):
         if self.pending:
+            # 此处list(self)会无限递归
             while True:
                 try:
                     next(self)
