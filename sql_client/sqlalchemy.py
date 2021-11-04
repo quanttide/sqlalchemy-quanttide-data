@@ -31,7 +31,7 @@ class SqlClient(BaseSqlClient):
         # 对user和password影响sqlalchemy解析url的字符进行转义(sqlalchemy解析完url会对user和password解转义) (若从dialect或环境变量传入整个url，需提前转义好)
         # sqlalchemy不会对database进行解转义，故database含?时需移至engine_kwargs['connect_args']['database']
         # sqlalchemy 1.3: database含@时也需移至engine_kwargs['connect_args']['database']
-        # 优先级: origin_result > dataset > dictionary
+        # 优先级: dictionary > origin_result > dataset
         if engine_kwargs is None:
             engine_kwargs = {}
         if dialect is None:
@@ -504,13 +504,13 @@ class SqlClient(BaseSqlClient):
             self.commit()
         if not fetchall:
             return len(args) if many and hasattr(args, '__len__') else 1
-        if origin_result:
+        if origin_result and not dictionary:
             return list(cursor) if cursor.returns_rows else []
         result = RecordCollection((Record(cursor.keys(), row) for row in cursor) if cursor.returns_rows else iter(()))
-        if dataset:
-            return result.dataset
         if dictionary:
             return result.all(as_dict=True)
+        if dataset:
+            return result.dataset
         return result
 
     def ping(self) -> None:
