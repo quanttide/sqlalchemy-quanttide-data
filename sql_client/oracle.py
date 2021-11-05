@@ -42,6 +42,7 @@ class SqlClient(BaseSqlClient):
     def execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
                 many: bool = False, commit: Optional[bool] = None, cursor: Any = None) -> Union[int, tuple, list]:
         # cx_Oracle.Cursor.execute不能传入None
+        # execute执行后修改rowfactory才有效
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         ori_cursor = cursor
         if cursor is None:
@@ -52,6 +53,8 @@ class SqlClient(BaseSqlClient):
             cursor.executemany(query, args)
         if commit and not self._autocommit:
             self.commit()
+        if fetchall and (self.dictionary if dictionary is None else dictionary):
+            cursor.rowfactory = lambda *args: dict(zip((col[0] for col in cursor.description), args))
         result = cursor.fetchall() if fetchall else len(args) if many and hasattr(args, '__len__') else 1
         if ori_cursor is None:
             cursor.close()
@@ -71,10 +74,6 @@ class SqlClient(BaseSqlClient):
     def _before_query_and_get_cursor(self, fetchall: bool = True, dictionary: Optional[bool] = None
                                      ) -> cx_Oracle.Cursor:
         self.set_connection()
-        if fetchall and (self.dictionary if dictionary is None else dictionary):
-            cursor = self.connection.cursor()
-            cursor.rowfactory = lambda *args: dict(zip((col[0] for col in cursor.description), args))
-            return cursor
         return self.connection.cursor()
 
     def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,

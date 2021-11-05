@@ -16,26 +16,32 @@ class SqlClientTestCase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.db.query('delete from {}'.format(cls.table))
+        cls.db.query('delete from {}'.format(cls.table), fetchall=False)
         cls.db.close()
 
     def setUp(self) -> None:
-        self.db.query('delete from {}'.format(self.table))
+        self.db.query('delete from {}'.format(self.table), fetchall=False)
 
     def _query_middleware(self, query: str, args=None, query_func=None, **kwargs):
         if query_func is None:
             query_func = self.db.query
         return query_func(query, args, **kwargs)
 
-    def _test_query(self, result, query, args=None, to_result_class=True, map_tuple=True, **kwargs):
-        self.assertEqual(result if not to_result_class else self.result_class(map(
-            tuple, result)) if map_tuple else self.result_class(result), self._query_middleware(query, args, **kwargs))
+    def _test_query(self, expected, query, args=None, to_result_class=True, map_tuple=True, result_factory=None,
+                    **kwargs):
+        self.assertEqual(expected if not to_result_class else
+                         self.result_class(map(tuple, expected)) if map_tuple else self.result_class(expected),
+                         self._query_middleware(query, args, **kwargs) if result_factory is None else
+                         result_factory(self._query_middleware(query, args, **kwargs)))
 
-    def _subtest_query(self, result, query, args=None, msg=None, to_result_class=True, map_tuple=True, **kwargs):
+    def _subtest_query(self, expected, query, args=None, msg=None, to_result_class=True, map_tuple=True,
+                       result_factory=None, **kwargs):
         if to_result_class:
-            result = self.result_class(map(tuple, result)) if map_tuple else self.result_class(result)
-        with self.subTest(*() if msg is None else (msg,), result=result, query=query, args=args, kwargs=kwargs):
-            self.assertEqual(result, self._query_middleware(query, args, **kwargs))
+            expected = self.result_class(map(tuple, expected)) if map_tuple else self.result_class(expected)
+        with self.subTest(*() if msg is None else (msg,), result=expected, query=query, args=args, kwargs=kwargs):
+            self.assertEqual(expected,
+                             self._query_middleware(query, args, **kwargs) if result_factory is None else
+                             result_factory(self._query_middleware(query, args, **kwargs)))
 
     def test_query(self):
         self._subtest_query([[1]], 'select 1 from dual')

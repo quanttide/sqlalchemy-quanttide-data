@@ -91,7 +91,7 @@ class SqlClient(BaseSqlClient):
         if charset == '':
             charset = {'mysql': 'utf8mb4', 'postgresql': None}.get(dialect, 'utf8')
         if charset is not None:
-            kwargs['charset'] = charset
+            kwargs['charset' if dialect != 'oracle' else 'encoding'] = charset
         engine_kwargs.setdefault('execution_options', {})['autocommit'] = autocommit
         if kwargs:
             if engine_kwargs.get('connect_args'):
