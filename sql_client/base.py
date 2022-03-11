@@ -6,7 +6,14 @@ import contextlib
 import enum
 import re
 import itertools
-from typing import Any, Union, Optional, Tuple, Iterable, Collection, Sequence
+from typing import Any, Union, Optional, Tuple, Iterable, Collection, Sequence, Generator
+
+
+class Notset:
+    pass
+
+
+NOTSET = Notset()
 
 
 class Paramstyle(enum.IntEnum):
@@ -94,27 +101,28 @@ class SqlClient(object):
             self.try_connect()
 
     def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
-              not_one_by_one: bool = True, auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
-              commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
-              escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
-              args_to_dict: Union[bool, None, tuple] = (), to_paramstyle: Union[Paramstyle, None, tuple] = (),
+              chunksize: Optional[int] = None, not_one_by_one: bool = True, auto_format: bool = False,
+              keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
+              escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
+              empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, Notset, None] = NOTSET,
+              to_paramstyle: Union[Paramstyle, Notset, None] = NOTSET,
               try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
-              raise_error: Optional[bool] = None) -> Union[int, tuple, list]:
+              raise_error: Optional[bool] = None) -> Union[int, tuple, list, Generator]:
         # args 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
         # auto_format=True: 注意此时query会被format一次; args_to_dict视为False;
         #                   首条记录需为dict(not_one_by_one=False时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=(): 读取默认配置
+        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=NOTSET: 读取默认配置
         if args and not hasattr(args, '__getitem__') and hasattr(args, '__iter__'):  # set, Generator, range
             args = tuple(args)
         if not args and args not in (0, ''):
-            return self.try_execute(query, args, fetchall, dictionary, False, commit, try_times_connect,
+            return self.try_execute(query, args, fetchall, dictionary, chunksize, False, commit, try_times_connect,
                                     time_sleep_connect, raise_error)
         if escape_auto_format is None:
             escape_auto_format = self.escape_auto_format
         if auto_format:
             args_to_dict = False
-        if isinstance(to_paramstyle, tuple):
+        if to_paramstyle is NOTSET:
             to_paramstyle = self.to_paramstyle
         if to_paramstyle is not None:
             args_to_dict = to_paramstyle in (Paramstyle.pyformat, Paramstyle.named)
@@ -153,8 +161,8 @@ class SqlClient(object):
                     query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
                                                                 if escape_auto_format else keys)),
                                          ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
-            return self.try_execute(query, args, fetchall, dictionary, is_multiple, commit, try_times_connect,
-                                    time_sleep_connect, raise_error)
+            return self.try_execute(query, args, fetchall, dictionary, chunksize, is_multiple, commit,
+                                    try_times_connect, time_sleep_connect, raise_error)
         # 依次执行
         ori_query = query
         result = [] if fetchall else 0
@@ -165,20 +173,21 @@ class SqlClient(object):
                 query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
                                                             if escape_auto_format else keys)),
                                      ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
-        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
+        cursor = self._before_query_and_get_cursor(fetchall, dictionary) if chunksize is None or not fetchall else None
         for arg in args:
             if auto_format and keys is None:
                 query = ori_query.format('({})'.format(','.join(map(escape_formatter.format if escape_auto_format else
                                                                     str, arg)))
                                          if isinstance(arg, dict) and not is_key_generated else '',
                                          ','.join(self.paramstyle_formatter(arg, to_paramstyle)))
-            temp_result = self.try_execute(query, arg, fetchall, dictionary, not_one_by_one, commit, try_times_connect,
-                                           time_sleep_connect, raise_error, cursor)
+            temp_result = self.try_execute(query, arg, fetchall, dictionary, chunksize, not_one_by_one, commit,
+                                           try_times_connect, time_sleep_connect, raise_error, cursor)
             if fetchall:
                 result.append(temp_result)
             else:
                 result += temp_result
-        cursor.close()
+        if chunksize is None or not fetchall:
+            cursor.close()
         return result
 
     def save_data(self, args: Any, table: Optional[str] = None, statement: Optional[str] = None,
@@ -197,18 +206,18 @@ class SqlClient(object):
         query = '{} {}{{}} VALUES({{}}){}'.format(
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
             ' {}'.format(extra) if extra is not None else '')
-        return self.query(query, args, False, False, not_one_by_one, True, keys, commit, escape_auto_format,
-                          escape_formatter, empty_string_to_none, False, (), try_times_connect, time_sleep_connect,
+        return self.query(query, args, False, False, None, not_one_by_one, True, keys, commit, escape_auto_format,
+                          escape_formatter, empty_string_to_none, False, NOTSET, try_times_connect, time_sleep_connect,
                           raise_error)
 
     def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
                       key_fields: Union[str, Iterable[str]] = 'id', extra_fields: Union[str, Iterable[str], None] = '',
-                      tried_field: Optional[str] = None, tried: Union[int, str, tuple, None] = 'between',
+                      tried_field: Optional[str] = None, tried: Union[int, str, Notset, None] = 'between',
                       tried_min: Union[int, str, None] = 1, tried_max: Union[int, str, None] = 5,
-                      tried_after: Union[int, str, tuple, None] = '-', finished_field: Optional[str] = None,
+                      tried_after: Union[int, str, Notset, None] = '-', finished_field: Optional[str] = None,
                       finished: Union[int, str, None] = 0, next_time_field: Optional[str] = None,
-                      next_time: Union[int, float, str, tuple, None] = None,
-                      next_time_after: Union[int, float, str, tuple, None] = (), lock: bool = True,
+                      next_time: Union[int, float, str, Notset, None] = None,
+                      next_time_after: Union[int, float, str, Notset, None] = NOTSET, lock: bool = True,
                       dictionary: Optional[bool] = None, autocommit_after: Optional[bool] = None,
                       select_where: Optional[str] = None, select_extra: str = '', set_extra: Optional[str] = '',
                       update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
@@ -218,13 +227,13 @@ class SqlClient(object):
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
         # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
-        # tried: 默认值'between'表示取tried_min<=tried_field<=tried_max, 也可传入'>=0'等(传入空元组()表示不限制),
-        #        如需多个条件, 可传入空元组()并往select_extra传入例如' and (<tried_field> is null or <tried_field> <= <time>)'
+        # tried: 默认值'between'表示取tried_min<=tried_field<=tried_max, 也可传入'>=0'等(传入NOTSET表示不限制),
+        #        如需多个条件, 可传入NOTSET并往select_extra传入例如' and (<tried_field> is null or <tried_field> <= <time>)'
         # tried_after: 默认值'-'表示取tried_field当前值的相反数, 也可传入'+1'等
-        #              (传入空元组()表示不修改, 传入None则设为null, 传入''则根据empty_string_to_none决定是否转为null)
-        # next_time: 默认值None表示取next_time_field<=当前timestamp整数部分(注意取不到为null的记录), 传入空元组()表示不限制, 如需多个条件,
-        #            可传入空元组()并往select_extra传入例如' and (<next_time_field> is null or <next_time_field> <= <time>)'
-        # next_time_after: 默认值空元组()表示不修改, 传入None则设为null, 传入''则根据empty_string_to_none决定是否转为null
+        #              (传入NOTSET表示不修改, 传入None则设为null, 传入''则根据empty_string_to_none决定是否转为null)
+        # next_time: 默认值None表示取next_time_field<=当前timestamp整数部分(注意取不到为null的记录), 传入NOTSET表示不限制, 如需多个条件,
+        #            可传入NOTSET并往select_extra传入例如' and (<next_time_field> is null or <next_time_field> <= <time>)'
+        # next_time_after: 默认值NOTSET表示不修改, 传入None则设为null, 传入''则根据empty_string_to_none决定是否转为null
         # select_where: 不为None则替换select一句的where部分(为''时删除where)
         # update_set: 不为None则替换update一句的set部分
         # update_where: 不为None则替换update一句的where部分
@@ -239,7 +248,7 @@ class SqlClient(object):
             extra_fields = ','.join(extra_fields)
         args = []
         if select_where is None:
-            if not tried_field or tried == ():
+            if not tried_field or tried is NOTSET:
                 select_tried = ''
             elif tried is None or tried == 'null':
                 select_tried = tried_field + ' is null'
@@ -269,7 +278,7 @@ class SqlClient(object):
             else:
                 select_finished = finished_field + '=%s'
                 args.append(finished)
-            if not next_time_field or next_time == ():
+            if not next_time_field or next_time is NOTSET:
                 select_next_time = ''
             elif next_time is None:
                 select_next_time = '{}<={}'.format(next_time_field, int(time.time()))
@@ -305,7 +314,7 @@ class SqlClient(object):
                 self.autocommit = autocommit_after
             return result
         args = []
-        if not tried_field or tried_after == ():
+        if not tried_field or tried_after is NOTSET:
             update_tried = ''
         elif tried_after == '-':
             update_tried = '{0}=-{0}'.format(tried_field)
@@ -320,7 +329,7 @@ class SqlClient(object):
         else:
             update_tried = tried_field + '=%s'
             args.append(tried_after)
-        if not next_time_field or next_time_after == ():
+        if not next_time_field or next_time_after is NOTSET:
             update_next_time = ''
         elif isinstance(next_time_after, (int, float)):
             update_next_time = '{}={}'.format(next_time_field,
@@ -548,10 +557,10 @@ class SqlClient(object):
                 return
 
     def try_execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
-                    many: bool = False, commit: Optional[bool] = None,
+                    chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None,
                     try_times_connect: Union[int, float, None] = None,
                     time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
-                    cursor: Any = None) -> Union[int, tuple, list]:
+                    cursor: Any = None) -> Union[int, tuple, list, Generator]:
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         if try_times_connect is None:
             try_times_connect = self.try_times_connect
@@ -565,8 +574,8 @@ class SqlClient(object):
         try_count_connect = 0
         while True:
             try:
-                result = self.execute(query, args, fetchall, dictionary, many, commit, cursor)
-                if ori_cursor is None:
+                result = self.execute(query, args, fetchall, dictionary, chunksize, many, commit, cursor)
+                if ori_cursor is None and (chunksize is None or not fetchall):
                     cursor.close()
                 return result
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
@@ -601,7 +610,8 @@ class SqlClient(object):
         return 0
 
     def execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
-                many: bool = False, commit: Optional[bool] = None, cursor: Any = None) -> Union[int, tuple, list]:
+                chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None, cursor: Any = None
+                ) -> Union[int, tuple, list, Generator]:
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         ori_cursor = cursor
         if cursor is None:
@@ -612,10 +622,20 @@ class SqlClient(object):
             cursor.executemany(query, args)
         if commit and not self._autocommit:
             self.commit()
-        result = cursor.fetchall() if fetchall else len(args) if many and hasattr(args, '__len__') else 1
-        if ori_cursor is None:
+        result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
+                  ) if fetchall else len(args) if many and hasattr(args, '__len__') else 1
+        if ori_cursor is None and (chunksize is None or not fetchall):
             cursor.close()
         return result
+
+    @staticmethod
+    def _fetchmany_generator(cursor, chunksize):
+        while True:
+            result = cursor.fetchmany(chunksize)
+            if not result:
+                cursor.close()
+                return
+            yield result
 
     def ping(self) -> None:
         try:
@@ -632,12 +652,12 @@ class SqlClient(object):
             self.try_connect()
 
     def standardize_args(self, args: Any, to_multiple: Optional[bool] = None,
-                         empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, None, tuple] = (),
+                         empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, Notset, None] = NOTSET,
                          get_info: bool = False, keys: Optional[Iterable[str]] = None,
                          nums: Optional[Iterable[int]] = None
                          ) -> Union[Sequence, dict, None, Tuple[Union[Sequence, dict], bool, bool]]:
         # get_info=True: 返回值除了标准化的变量以外还有: 是否multiple, 字典key是否为生成的
-        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=(): 读取默认配置
+        # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=NOTSET: 读取默认配置
         # args_to_dict=False且args为dict形式时，keys需不为None(query方法已预先处理)
         # nums: from_paramstyle=Paramstyle.numeric且to_paramstyle为Paramstyle.format或Paramstyle.qmark且通配符乱序时，传入通配符数字列表
         if args is None:
@@ -657,7 +677,7 @@ class SqlClient(object):
         if to_multiple is None:  # 检测是否multiple
             to_multiple = not isinstance(args, dict) and not isinstance(args[0], str) and (
                     hasattr(args[0], '__getitem__') or hasattr(args[0], '__iter__'))
-        if isinstance(args_to_dict, tuple):
+        if args_to_dict is NOTSET:
             args_to_dict = self.args_to_dict
         if empty_string_to_none is None:
             empty_string_to_none = self.empty_string_to_none
@@ -759,10 +779,10 @@ class SqlClient(object):
 
     @classmethod
     def transform_paramstyle(cls, query: str, to_paramstyle: Paramstyle,
-                             from_paramstyle: Union[Paramstyle, None, tuple] = ()) -> str:
+                             from_paramstyle: Union[Paramstyle, Notset, None] = NOTSET) -> str:
         # args需预先转换为dict或list形式（与to_paramstyle相对应的那一种）
-        # from_paramstyle=None: 无paramstyle; from_paramstyle=(): 未传入该参数
-        if isinstance(from_paramstyle, tuple):
+        # from_paramstyle=None: 无paramstyle; from_paramstyle=NOTSET: 未传入该参数
+        if from_paramstyle is NOTSET:
             from_paramstyle = cls.judge_paramstyle(query, to_paramstyle)
         if from_paramstyle is None:
             return query
@@ -818,10 +838,27 @@ class SqlClient(object):
         except Exception as e:
             return 'query: {}  args: {}  {}: {}'.format(query, args, str(type(e))[8:-2], e)
 
+    def query_file(self, path: str, encoding: Optional[str] = None, args: Any = None, fetchall: bool = True,
+                   dictionary: Optional[bool] = None, chunksize: Optional[int] = None, not_one_by_one: bool = True,
+                   auto_format: bool = False, keys: Union[str, Collection[str], None] = None,
+                   commit: Optional[bool] = None, escape_auto_format: Optional[bool] = None,
+                   escape_formatter: Optional[str] = None, empty_string_to_none: Optional[bool] = None,
+                   args_to_dict: Union[bool, Notset, None] = NOTSET,
+                   to_paramstyle: Union[Paramstyle, Notset, None] = NOTSET,
+                   try_times_connect: Union[int, float, None] = None,
+                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+                   ) -> Union[int, tuple, list, Generator]:
+        with open(path, encoding=encoding) as f:
+            query = f.read()
+        return self.query(query, args, fetchall, dictionary, chunksize, not_one_by_one, auto_format, keys, commit,
+                          escape_auto_format, escape_formatter, empty_string_to_none, args_to_dict, to_paramstyle,
+                          try_times_connect, time_sleep_connect, raise_error)
+
     def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,
-                  commit: Optional[bool] = None, empty_string_to_none: Optional[bool] = None,
-                  try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
-                  raise_error: Optional[bool] = None) -> Union[int, tuple, list]:
+                  chunksize: Optional[int] = None, commit: Optional[bool] = None,
+                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+                  ) -> Union[int, tuple, list, Generator]:
         # 执行存储过程
         # name: 存储过程名
         # args: 存储过程参数(不能为None，要可迭代)
@@ -841,8 +878,10 @@ class SqlClient(object):
                 cursor.callproc(name, args)
                 if commit and not self._autocommit:
                     self.commit()
-                result = cursor.fetchall() if fetchall else 1
-                cursor.close()
+                result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
+                          ) if fetchall else 1
+                if chunksize is None or not fetchall:
+                    cursor.close()
                 return result
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
                 try_count_connect += 1

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import time
-from typing import Any, Union, Optional, Iterable
+from typing import Any, Union, Optional, Iterable, Generator
 
 import cx_Oracle
 
@@ -20,6 +20,7 @@ class SqlClient(BaseSqlClient):
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
         # oracle如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
         # oracle无replace语句；insert必须带into
+        # 若database为空则host视为tnsname
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
                          args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)
@@ -36,11 +37,12 @@ class SqlClient(BaseSqlClient):
 
     def connect(self) -> None:
         self.connection = self.lib.connect(user=self.user, password=self.password, dsn='{}:{}/{}'.format(
-            self.host, self.port, self.database), encoding=self.charset)
+            self.host, self.port, self.database) if self.database is not None else self.host, encoding=self.charset)
         self.connection.autocommit = self._autocommit
 
     def execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
-                many: bool = False, commit: Optional[bool] = None, cursor: Any = None) -> Union[int, tuple, list]:
+                chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None, cursor: Any = None
+                ) -> Union[int, tuple, list, Generator]:
         # cx_Oracle.Cursor.execute不能传入None
         # execute执行后修改rowfactory才有效
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
@@ -55,8 +57,9 @@ class SqlClient(BaseSqlClient):
             self.commit()
         if fetchall and (self.dictionary if dictionary is None else dictionary):
             cursor.rowfactory = lambda *args: dict(zip((col[0] for col in cursor.description), args))
-        result = cursor.fetchall() if fetchall else len(args) if many and hasattr(args, '__len__') else 1
-        if ori_cursor is None:
+        result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
+                  ) if fetchall else len(args) if many and hasattr(args, '__len__') else 1
+        if ori_cursor is None and (chunksize is None or not fetchall):
             cursor.close()
         return result
 
@@ -77,9 +80,10 @@ class SqlClient(BaseSqlClient):
         return self.connection.cursor()
 
     def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,
-                  commit: Optional[bool] = None, empty_string_to_none: Optional[bool] = None,
-                  try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
-                  raise_error: Optional[bool] = None, kwargs: Optional[dict] = None) -> Union[int, tuple, list]:
+                  chunksize: Optional[int] = None, commit: Optional[bool] = None,
+                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                  kwargs: Optional[dict] = None) -> Union[int, tuple, list, Generator]:
         # cx_Oracle.Cursor.callproc支持kwargs
         # 执行存储过程
         # name: 存储过程名
@@ -102,8 +106,10 @@ class SqlClient(BaseSqlClient):
                 cursor.callproc(name, args, kwargs)
                 if commit and not self._autocommit:
                     self.commit()
-                result = cursor.fetchall() if fetchall else 1
-                cursor.close()
+                result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
+                          ) if fetchall else 1
+                if chunksize is None or not fetchall:
+                    cursor.close()
                 return result
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
                 try_count_connect += 1
@@ -134,10 +140,10 @@ class SqlClient(BaseSqlClient):
         return 0
 
     def call_func(self, name: str, return_type: type, args: Iterable = (), fetchall: bool = True,
-                  dictionary: Optional[bool] = None, commit: Optional[bool] = None,
+                  dictionary: Optional[bool] = None, chunksize: Optional[int] = None, commit: Optional[bool] = None,
                   empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
-                  kwargs: Optional[dict] = None) -> Union[int, tuple, list]:
+                  kwargs: Optional[dict] = None) -> Union[int, tuple, list, Generator]:
         # 执行函数
         # name: 函数名
         # return_type: 返回值的类型(必填)，参见：
@@ -162,8 +168,10 @@ class SqlClient(BaseSqlClient):
                 cursor.callfunc(name, return_type, args, kwargs)
                 if commit and not self._autocommit:
                     self.commit()
-                result = cursor.fetchall() if fetchall else 1
-                cursor.close()
+                result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
+                          ) if fetchall else 1
+                if chunksize is None or not fetchall:
+                    cursor.close()
                 return result
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
                 try_count_connect += 1
