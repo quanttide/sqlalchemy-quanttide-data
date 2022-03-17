@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import time
-from typing import Any, Union, Optional, Iterable, Generator
+from typing import Any, Union, Optional, Tuple, Iterable, Generator
 
 import cx_Oracle
 
@@ -41,8 +41,11 @@ class SqlClient(BaseSqlClient):
         self.connection.autocommit = self._autocommit
 
     def execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
-                chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None, cursor: Any = None
-                ) -> Union[int, tuple, list, Generator]:
+                chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None,
+                keep_cursor: Optional[bool] = False, cursor: Optional[cx_Oracle.Cursor] = None
+                ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                           Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                                 cx_Oracle.Cursor]]:
         # cx_Oracle.Cursor.execute不能传入None
         # execute执行后修改rowfactory才有效
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
@@ -57,8 +60,10 @@ class SqlClient(BaseSqlClient):
             self.commit()
         if fetchall and (self.dictionary if dictionary is None else dictionary):
             cursor.rowfactory = lambda *args: dict(zip((col[0] for col in cursor.description), args))
-        result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
+        result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize, keep_cursor)
                   ) if fetchall else len(args) if many and hasattr(args, '__len__') else 1
+        if keep_cursor:
+            return result, cursor
         if ori_cursor is None and (chunksize is None or not fetchall):
             cursor.close()
         return result
@@ -81,14 +86,19 @@ class SqlClient(BaseSqlClient):
 
     def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,
                   chunksize: Optional[int] = None, commit: Optional[bool] = None,
-                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                  empty_string_to_none: Optional[bool] = None, keep_cursor: Optional[bool] = False,
+                  cursor: Optional[cx_Oracle.Cursor] = None, try_times_connect: Union[int, float, None] = None,
                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
-                  kwargs: Optional[dict] = None) -> Union[int, tuple, list, Generator]:
+                  kwargs: Optional[dict] = None
+                  ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                             Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                                   cx_Oracle.Cursor]]:
         # cx_Oracle.Cursor.callproc支持kwargs
         # 执行存储过程
         # name: 存储过程名
         # args: 存储过程参数(不能为None，要可迭代)
         # fetchall=False: return成功执行数(1)
+        # keep_cursor: 返回(result, cursor), 并且不自动关闭cursor
         if kwargs is None:
             kwargs = {}
         if try_times_connect is None:
@@ -99,7 +109,8 @@ class SqlClient(BaseSqlClient):
             raise_error = self.raise_error
         if args and (self.empty_string_to_none if empty_string_to_none is None else empty_string_to_none):
             args = tuple(each if each != '' else None for each in args)
-        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
+        if cursor is None:
+            cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         try_count_connect = 0
         while True:
             try:
@@ -108,6 +119,8 @@ class SqlClient(BaseSqlClient):
                     self.commit()
                 result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
                           ) if fetchall else 1
+                if keep_cursor:
+                    return result, cursor
                 if chunksize is None or not fetchall:
                     cursor.close()
                 return result
@@ -141,9 +154,13 @@ class SqlClient(BaseSqlClient):
 
     def call_func(self, name: str, return_type: type, args: Iterable = (), fetchall: bool = True,
                   dictionary: Optional[bool] = None, chunksize: Optional[int] = None, commit: Optional[bool] = None,
-                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                  empty_string_to_none: Optional[bool] = None, keep_cursor: Optional[bool] = False,
+                  cursor: Optional[cx_Oracle.Cursor] = None, try_times_connect: Union[int, float, None] = None,
                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
-                  kwargs: Optional[dict] = None) -> Union[int, tuple, list, Generator]:
+                  kwargs: Optional[dict] = None
+                  ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                             Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                                   cx_Oracle.Cursor]]:
         # 执行函数
         # name: 函数名
         # return_type: 返回值的类型(必填)，参见：
@@ -151,6 +168,7 @@ class SqlClient(BaseSqlClient):
         #              https://cx-oracle.readthedocs.io/en/latest/api_manual/cursor.html#Cursor.callfunc
         # args: 函数参数(不能为None，要可迭代)
         # fetchall=False: return成功执行数(1)
+        # keep_cursor: 返回(result, cursor), 并且不自动关闭cursor
         if kwargs is None:
             kwargs = {}
         if try_times_connect is None:
@@ -161,7 +179,8 @@ class SqlClient(BaseSqlClient):
             raise_error = self.raise_error
         if args and (self.empty_string_to_none if empty_string_to_none is None else empty_string_to_none):
             args = tuple(each if each != '' else None for each in args)
-        cursor = self._before_query_and_get_cursor(fetchall, dictionary)
+        if cursor is None:
+            cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         try_count_connect = 0
         while True:
             try:
@@ -170,6 +189,8 @@ class SqlClient(BaseSqlClient):
                     self.commit()
                 result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
                           ) if fetchall else 1
+                if keep_cursor:
+                    return result, cursor
                 if chunksize is None or not fetchall:
                     cursor.close()
                 return result

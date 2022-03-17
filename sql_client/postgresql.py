@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import time
-from typing import Any, Union, Optional, Generator
+from typing import Any, Union, Optional, Tuple, Generator
 
 import psycopg2.extras
 import psycopg2.extensions
@@ -47,9 +47,12 @@ class SqlClient(BaseSqlClient):
 
     def try_execute(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
                     chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None,
+                    keep_cursor: Optional[bool] = False, cursor: Optional[psycopg2.extensions.cursor] = None,
                     try_times_connect: Union[int, float, None] = None,
-                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
-                    cursor: Any = None) -> Union[int, tuple, list, Generator]:
+                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+                    ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                               Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                                     psycopg2.extensions.cursor]]:
         # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         if try_times_connect is None:
@@ -64,8 +67,8 @@ class SqlClient(BaseSqlClient):
         try_count_connect = 0
         while True:
             try:
-                result = self.execute(query, args, fetchall, dictionary, chunksize, many, commit, cursor)
-                if ori_cursor is None and (chunksize is None or not fetchall):
+                result = self.execute(query, args, fetchall, dictionary, chunksize, many, commit, keep_cursor, cursor)
+                if ori_cursor is None and (chunksize is None or not fetchall) and not keep_cursor:
                     cursor.close()
                 return result
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
