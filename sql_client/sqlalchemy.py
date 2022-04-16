@@ -17,7 +17,7 @@ class SqlClient(BaseSqlClient):
 
     def __init__(self, dialect: Optional[str] = None, driver: Optional[str] = None, host: Optional[str] = None,
                  port: Union[int, str, None] = None, user: Optional[str] = None, password: Optional[str] = None,
-                 database: Optional[str] = None, charset: Optional[str] = '', autocommit: bool = True,
+                 database: Optional[str] = None, charset: Optional[str] = NOTSET, autocommit: bool = True,
                  connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: Optional[str] = None, dictionary: bool = False,
                  escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
@@ -88,7 +88,7 @@ class SqlClient(BaseSqlClient):
             engine_kwargs['pool_size'] = pool_size
         else:
             engine_kwargs['poolclass'] = sqlalchemy.pool.NullPool
-        if charset == '':
+        if charset is NOTSET:
             charset = {'mysql': 'utf8mb4', 'postgresql': None}.get(dialect, 'utf8')
         if charset is not None:
             kwargs['charset' if dialect != 'oracle' else 'encoding'] = charset
