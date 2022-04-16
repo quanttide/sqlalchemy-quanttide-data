@@ -72,7 +72,7 @@ class SqlClient(object):
             database = os.environ.get('DB_DATABASE')
         if table is None:
             table = os.environ.get('DB_TABLE')
-        if port is None and ':' in host:
+        if port is None and host is not None and ':' in host:
             host, port = host.rsplit(':', 1)
         self.host = host
         self.port = int(port) if isinstance(port, str) else port
