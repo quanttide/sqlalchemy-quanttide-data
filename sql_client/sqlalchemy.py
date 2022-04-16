@@ -89,7 +89,7 @@ class SqlClient(BaseSqlClient):
         else:
             engine_kwargs['poolclass'] = sqlalchemy.pool.NullPool
         if charset is NOTSET:
-            charset = {'mysql': 'utf8mb4', 'postgresql': None}.get(dialect, 'utf8')
+            charset = {'mysql': 'utf8mb4', 'postgresql': None, 'sqlite': None}.get(dialect, 'utf8')
         if charset is not None:
             kwargs['charset' if dialect != 'oracle' else 'encoding'] = charset
         engine_kwargs.setdefault('execution_options', {})['autocommit'] = autocommit
