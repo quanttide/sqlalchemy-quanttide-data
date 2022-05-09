@@ -84,8 +84,12 @@ class RecordCollection(object):
 
     def __init__(self, rows):
         self._rows = rows
-        self._all_rows = []
-        self.pending = True
+        if isinstance(rows, (list, tuple)):
+            self._all_rows = rows
+            self.pending = False
+        else:
+            self._all_rows = []
+            self.pending = True
 
     def __repr__(self):
         return '<RecordCollection size={} pending={}>'.format(len(self), self.pending)
@@ -97,8 +101,8 @@ class RecordCollection(object):
         while True:
             # Other code may have iterated between yields,
             # so always check the cache.
-            if i < len(self):
-                yield self[i]
+            if i < len(self._all_rows):
+                yield self._all_rows[i]
             else:
                 # Throws StopIteration when done.
                 # Prevent StopIteration bubbling from generator, following https://www.python.org/dev/peps/pep-0479/
@@ -141,7 +145,6 @@ class RecordCollection(object):
 
     def __len__(self):
         if self.pending:
-            # 此处list(self)会无限递归
             while True:
                 try:
                     next(self)
