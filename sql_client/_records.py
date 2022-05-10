@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from inspect import isclass
+from typing import Union
 
 import tablib
 
@@ -84,7 +85,7 @@ class RecordCollection(object):
 
     def __init__(self, rows, cursor=None):
         self._rows = rows
-        if isinstance(rows, (list, tuple)):
+        if isinstance(rows, list):
             self._all_rows = rows
             self.pending = False
         else:
@@ -104,6 +105,8 @@ class RecordCollection(object):
             # so always check the cache.
             if i < len(self._all_rows):
                 yield self._all_rows[i]
+            elif not self.pending:
+                return
             else:
                 # Throws StopIteration when done.
                 # Prevent StopIteration bubbling from generator, following https://www.python.org/dev/peps/pep-0479/
@@ -117,6 +120,8 @@ class RecordCollection(object):
         return self.__next__()
 
     def __next__(self):
+        if not self.pending:
+            raise StopIteration('RecordCollection contains no more rows.')
         try:
             nextrow = next(self._rows)
             self._all_rows.append(nextrow)
@@ -127,7 +132,7 @@ class RecordCollection(object):
                 self.cursor.close()
             raise StopIteration('RecordCollection contains no more rows.')
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Union[int, slice]):
         is_int = isinstance(key, int)
 
         # Convert RecordCollection[1] into slice.
@@ -167,7 +172,7 @@ class RecordCollection(object):
 
         # If the RecordCollection is empty, just return the empty set
         # Check number of rows by typecasting to list
-        if len(list(self)) == 0:
+        if len(self) == 0:
             return data
 
         # Set the column names as headers on Tablib Dataset.
@@ -183,16 +188,19 @@ class RecordCollection(object):
     def all(self, as_dict=False, as_ordereddict=False):
         """Returns a list of all rows for the RecordCollection. If they haven't
         been fetched yet, consume the iterator and cache the results."""
-
-        # By calling list it calls the __iter__ method
-        rows = list(self)
+        if self.pending:
+            while True:
+                try:
+                    next(self)
+                except StopIteration:
+                    break
 
         if as_dict:
-            return [r.as_dict() for r in rows]
+            return [r.as_dict() for r in self]
         elif as_ordereddict:
-            return [r.as_dict(ordered=True) for r in rows]
+            return [r.as_dict(ordered=True) for r in self]
 
-        return rows
+        return self._all_rows
 
     def as_dict(self, ordered=False):
         return self.all(as_dict=not ordered, as_ordereddict=ordered)
