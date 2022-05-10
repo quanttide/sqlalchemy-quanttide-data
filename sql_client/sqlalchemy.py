@@ -540,15 +540,17 @@ class SqlClient(BaseSqlClient):
                 result = (RecordCollection(Record(cursor.keys(), row) for row in result) for result in
                           self._fetchmany_generator(cursor, chunksize, keep_cursor))
         else:
-            result = RecordCollection((Record(cursor.keys(), row) for row in cursor) if cursor.returns_rows else
-                                      iter(()), cursor)
+            if cursor.returns_rows:
+                result = RecordCollection(Record(cursor.keys(), row) for row in cursor)
+            else:
+                result = RecordCollection()
             if dictionary:
                 result = result.all(as_dict=True)
             elif dataset:
                 result = result.dataset
         if keep_cursor:
             return result, cursor
-        if not fetchall:
+        if chunksize is None or not fetchall:
             cursor.close()
         return result
 

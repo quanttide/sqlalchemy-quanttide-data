@@ -80,85 +80,8 @@ class Record(object):
         return self.dataset.export(format, **kwargs)
 
 
-class RecordCollection(object):
+class RecordCollection(list):
     """A set of excellent Records from a query."""
-
-    def __init__(self, rows, cursor=None):
-        self._rows = rows
-        if isinstance(rows, list):
-            self._all_rows = rows
-            self.pending = False
-        else:
-            self._all_rows = []
-            self.pending = True
-        self.cursor = cursor
-
-    def __repr__(self):
-        return '<RecordCollection size={} pending={}>'.format(len(self), self.pending)
-
-    def __iter__(self):
-        """Iterate over all rows, consuming the underlying generator
-        only when necessary."""
-        i = 0
-        while True:
-            # Other code may have iterated between yields,
-            # so always check the cache.
-            if i < len(self._all_rows):
-                yield self._all_rows[i]
-            elif not self.pending:
-                return
-            else:
-                # Throws StopIteration when done.
-                # Prevent StopIteration bubbling from generator, following https://www.python.org/dev/peps/pep-0479/
-                try:
-                    yield next(self)
-                except StopIteration:
-                    return
-            i += 1
-
-    def next(self):
-        return self.__next__()
-
-    def __next__(self):
-        if not self.pending:
-            raise StopIteration('RecordCollection contains no more rows.')
-        try:
-            nextrow = next(self._rows)
-            self._all_rows.append(nextrow)
-            return nextrow
-        except StopIteration:
-            self.pending = False
-            if self.cursor is not None:
-                self.cursor.close()
-            raise StopIteration('RecordCollection contains no more rows.')
-
-    def __getitem__(self, key: Union[int, slice]):
-        is_int = isinstance(key, int)
-
-        # Convert RecordCollection[1] into slice.
-        if is_int:
-            key = slice(key, key + 1)
-
-        while len(self) < key.stop or key.stop is None:
-            try:
-                next(self)
-            except StopIteration:
-                break
-
-        rows = self._all_rows[key]
-        if is_int:
-            return rows[0]
-        else:
-            return RecordCollection(iter(rows))
-
-    def __len__(self):
-        if self.pending:
-            while True:
-                try:
-                    next(self)
-                except StopIteration:
-                    break
-        return len(self._all_rows)
 
     def export(self, format, **kwargs):
         """Export the RecordCollection to a given format (courtesy of Tablib)."""
@@ -186,21 +109,12 @@ class RecordCollection(object):
         return data
 
     def all(self, as_dict=False, as_ordereddict=False):
-        """Returns a list of all rows for the RecordCollection. If they haven't
-        been fetched yet, consume the iterator and cache the results."""
-        if self.pending:
-            while True:
-                try:
-                    next(self)
-                except StopIteration:
-                    break
-
         if as_dict:
             return [r.as_dict() for r in self]
         elif as_ordereddict:
             return [r.as_dict(ordered=True) for r in self]
 
-        return self._all_rows
+        return self
 
     def as_dict(self, ordered=False):
         return self.all(as_dict=not ordered, as_ordereddict=ordered)
