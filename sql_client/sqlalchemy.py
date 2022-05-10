@@ -531,23 +531,24 @@ class SqlClient(BaseSqlClient):
                 cursor, chunksize, keep_cursor))) if cursor.returns_rows else []
         elif chunksize is not None and cursor.returns_rows:
             if dictionary:
-                result = (RecordCollection([Record(cursor.keys(), row) for row in result]).all(as_dict=True) for result
-                          in self._fetchmany_generator(cursor, chunksize, keep_cursor))
+                result = (RecordCollection(Record(cursor.keys(), row) for row in result).all(as_dict=True) for result in
+                          self._fetchmany_generator(cursor, chunksize, keep_cursor))
             elif dataset:
-                result = (RecordCollection([Record(cursor.keys(), row) for row in result]).dataset for result in
+                result = (RecordCollection(Record(cursor.keys(), row) for row in result).dataset for result in
                           self._fetchmany_generator(cursor, chunksize, keep_cursor))
             else:
-                result = (RecordCollection([Record(cursor.keys(), row) for row in result]) for result in
+                result = (RecordCollection(Record(cursor.keys(), row) for row in result) for result in
                           self._fetchmany_generator(cursor, chunksize, keep_cursor))
         else:
-            result = RecordCollection([Record(cursor.keys(), row) for row in cursor] if cursor.returns_rows else [])
+            result = RecordCollection((Record(cursor.keys(), row) for row in cursor) if cursor.returns_rows else
+                                      iter(()), cursor)
             if dictionary:
                 result = result.all(as_dict=True)
             elif dataset:
                 result = result.dataset
         if keep_cursor:
             return result, cursor
-        if chunksize is None or not fetchall:
+        if not fetchall:
             cursor.close()
         return result
 

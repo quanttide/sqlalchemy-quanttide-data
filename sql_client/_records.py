@@ -82,7 +82,7 @@ class Record(object):
 class RecordCollection(object):
     """A set of excellent Records from a query."""
 
-    def __init__(self, rows):
+    def __init__(self, rows, cursor=None):
         self._rows = rows
         if isinstance(rows, (list, tuple)):
             self._all_rows = rows
@@ -90,6 +90,7 @@ class RecordCollection(object):
         else:
             self._all_rows = []
             self.pending = True
+        self.cursor = cursor
 
     def __repr__(self):
         return '<RecordCollection size={} pending={}>'.format(len(self), self.pending)
@@ -122,6 +123,8 @@ class RecordCollection(object):
             return nextrow
         except StopIteration:
             self.pending = False
+            if self.cursor is not None:
+                self.cursor.close()
             raise StopIteration('RecordCollection contains no more rows.')
 
     def __getitem__(self, key):
