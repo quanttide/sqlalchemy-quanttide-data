@@ -86,7 +86,7 @@ class SqlClient(object):
         self.statement_save_data = statement_save_data
         self.dictionary = dictionary
         self.escape_auto_format = escape_auto_format
-        self.escape_formatter = escape_formatter  # sqlserver使用[]，不能只记一个字符
+        self.escape_formatter = escape_formatter  # sqlserver使用[], 不能只记一个字符
         self.empty_string_to_none = empty_string_to_none
         self.args_to_dict = args_to_dict
         self.to_paramstyle = to_paramstyle
@@ -209,8 +209,8 @@ class SqlClient(object):
                   empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
                   ) -> Union[int, tuple, list]:
-        # data_list 支持单条记录: list/tuple/dict，或多条记录: list/tuple/set[list/tuple/dict]
-        # 首条记录需为dict(one_by_one=True时所有记录均需为dict)，或者含除自增字段外所有字段并按顺序排好各字段值，或者自行传入keys
+        # data_list 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
+        # 首条记录需为dict(one_by_one=True时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录(有log)
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
         if not args and args not in (0, ''):
@@ -385,7 +385,7 @@ class SqlClient(object):
                 update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                 empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                 time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
-        # key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
+        # key_fields为''或None时, result需为dict或list[dict], key_fields取result的keys
         # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
         # update_where: 不为None则替换update一句的where部分
         result = self.standardize_args(result, True, False, None, False)
@@ -634,7 +634,7 @@ class SqlClient(object):
             cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         if not many:
             cursor.execute(query, args)
-        else:  # executemany: 一句插入多条记录，当语句超出1024000字符时拆分成多个语句；传单条记录需用列表包起来
+        else:  # executemany: 一句插入多条记录, 当语句超出1024000字符时拆分成多个语句; 传单条记录需用列表包起来
             cursor.executemany(query, args)
         if commit and not self._autocommit:
             self.commit()
@@ -677,8 +677,8 @@ class SqlClient(object):
                          ) -> Union[Sequence, dict, None, Tuple[Union[Sequence, dict], bool, bool]]:
         # get_info=True: 返回值除了标准化的变量以外还有: 是否multiple, 字典key是否为生成的
         # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=NOTSET: 读取默认配置
-        # args_to_dict=False且args为dict形式时，keys需不为None(query方法已预先处理)
-        # nums: from_paramstyle=Paramstyle.numeric且to_paramstyle为Paramstyle.format或Paramstyle.qmark且通配符乱序时，传入通配符数字列表
+        # args_to_dict=False且args为dict形式时, keys需不为None(query方法已预先处理)
+        # nums: from_paramstyle=Paramstyle.numeric且to_paramstyle为Paramstyle.format或Paramstyle.qmark且通配符乱序时, 传入通配符数字列表
         if args is None:
             return None if not get_info else (None, False, False)
         if not args and args not in (0, ''):
@@ -745,7 +745,7 @@ class SqlClient(object):
                                 ) if empty_string_to_none else (dict(zip(keys, args)),)
                     elif not hasattr(args[0], '__getitem__'):
                         if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
-                            # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                            # mysqlclient, pymysql均只支持dict, list, tuple, 不支持set, Generator等
                             args = tuple({key: value if value != '' else None for key, value in zip(keys, each)}
                                          for each in args) if empty_string_to_none else tuple(
                                 dict(zip(keys, each)) for each in args)
@@ -761,7 +761,7 @@ class SqlClient(object):
                                 ) if empty_string_to_none else (tuple(map(args.__getitem__, nums)),)
                     elif not hasattr(args[0], '__getitem__'):
                         if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
-                            # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                            # mysqlclient, pymysql均只支持dict, list, tuple, 不支持set, Generator等
                             args = tuple(tuple(each[num] if each[num] != '' else None for num in nums) for each in
                                          map(tuple, args)) if empty_string_to_none else tuple(
                                 tuple(map(each.__getitem__, nums)) for each in map(tuple, args))
@@ -776,7 +776,7 @@ class SqlClient(object):
                     args = (tuple(each if each != '' else None for each in args),) if empty_string_to_none else (args,)
                 elif not hasattr(args[0], '__getitem__'):
                     if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
-                        # mysqlclient, pymysql均只支持dict, list, tuple，不支持set, Generator等
+                        # mysqlclient, pymysql均只支持dict, list, tuple, 不支持set, Generator等
                         args = tuple(tuple(e if e != '' else None for e in each) for each in args
                                      ) if empty_string_to_none else tuple(tuple(each) for each in args)
                     else:  # list[int, etc.]
@@ -883,7 +883,7 @@ class SqlClient(object):
                              Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator], Any]]:
         # 执行存储过程
         # name: 存储过程名
-        # args: 存储过程参数(不能为None，要可迭代)
+        # args: 存储过程参数(不能为None, 要可迭代)
         # fetchall=False: return成功执行数(1)
         # keep_cursor: 返回(result, cursor), 并且不自动关闭cursor
         if try_times_connect is None:

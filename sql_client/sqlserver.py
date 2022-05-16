@@ -37,7 +37,7 @@ class SqlClient(BaseSqlClient):
         self.set_connection()
 
     def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
-        # pymssql.Connection没有literal和escape，暂不借鉴mysql实现
+        # pymssql.Connection没有literal和escape, 暂不借鉴mysql实现
         try:
             if args is None:
                 return query

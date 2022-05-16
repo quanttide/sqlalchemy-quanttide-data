@@ -26,10 +26,10 @@ class SqlClient(BaseSqlClient):
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False, origin_result: bool = False,
                  dataset: bool = False, is_pool: bool = False, pool_size: int = 1, engine_kwargs: Optional[dict] = None,
                  **kwargs):
-        # dialect也可输入完整url；或者将完整url存于环境变量：DATABASE_URL
+        # dialect也可输入完整url; 或者将完整url存于环境变量：DATABASE_URL
         # 完整url格式：dialect[+driver]://user:password@host/dbname[?key=value..]
-        # 对user和password影响sqlalchemy解析url的字符进行转义(sqlalchemy解析完url会对user和password解转义) (若从dialect或环境变量传入整个url，需提前转义好)
-        # sqlalchemy不会对database进行解转义，故database含?时需移至engine_kwargs['connect_args']['database']
+        # 对user和password影响sqlalchemy解析url的字符进行转义(sqlalchemy解析完url会对user和password解转义) (若从dialect或环境变量传入整个url, 需提前转义好)
+        # sqlalchemy不会对database进行解转义, 故database含?时需移至engine_kwargs['connect_args']['database']
         # sqlalchemy 1.3: database含@时也需移至engine_kwargs['connect_args']['database']
         # 优先级: dictionary > origin_result > dataset
         if engine_kwargs is None:
@@ -103,7 +103,7 @@ class SqlClient(BaseSqlClient):
         self._transactions = []
         if statement_save_data is None:
             statement_save_data = 'REPLACE' if dialect == 'mysql' else 'INSERT INTO'
-        if escape_auto_format is None:  # postgresql, oracle如果escape字段则区分大小写，故当前仅mysql设默认escape
+        if escape_auto_format is None:  # postgresql, oracle如果escape字段则区分大小写, 故当前仅mysql设默认escape
             escape_auto_format = dialect == 'mysql'
         if escape_formatter is None:
             escape_formatter = {'mysql': '`{}`', 'postgresql': '"{}"', 'oracle': '"{}"', 'sqlite': '"{}"',
@@ -128,7 +128,7 @@ class SqlClient(BaseSqlClient):
                                tablib.Dataset, Generator],
                          Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], RecordCollection,
                                      tablib.Dataset, Generator], sqlalchemy.engine.ResultProxy]]:
-        # sqlalchemy无cursor；增加origin_result, dataset参数
+        # sqlalchemy无cursor; 增加origin_result, dataset参数
         # args 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
         # auto_format=True: 注意此时query会被format一次; args_to_dict视为False;
         #                   首条记录需为dict(not_one_by_one=False时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
@@ -232,7 +232,7 @@ class SqlClient(BaseSqlClient):
                       time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
                       origin_result: Optional[bool] = None, dataset: Optional[bool] = None
                       ) -> Union[int, tuple, list, RecordCollection, tablib.Dataset]:
-        # sqlalchemy事务使用不同；增加origin_result, dataset参数
+        # sqlalchemy事务使用不同; 增加origin_result, dataset参数
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
         # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
@@ -455,7 +455,7 @@ class SqlClient(BaseSqlClient):
                                      tablib.Dataset, Generator],
                                Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], RecordCollection,
                                            tablib.Dataset, Generator], sqlalchemy.engine.ResultProxy]]:
-        # sqlalchemy无cursor；增加origin_result, dataset参数
+        # sqlalchemy无cursor; 增加origin_result, dataset参数
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         if try_times_connect is None:
             try_times_connect = self.try_times_connect
@@ -504,7 +504,7 @@ class SqlClient(BaseSqlClient):
                                  tablib.Dataset, Generator],
                            Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], RecordCollection,
                                        tablib.Dataset, Generator], sqlalchemy.engine.ResultProxy]]:
-        # 覆盖调用逻辑；增加origin_result, dataset参数
+        # 覆盖调用逻辑; 增加origin_result, dataset参数
         # fetchall=False: return成功执行语句数(many模式按数据条数)
         if dictionary is None:
             dictionary = self.dictionary
@@ -559,7 +559,7 @@ class SqlClient(BaseSqlClient):
         self.set_connection()
 
     def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
-        # sqlalchemy没有literal和escape，暂不借鉴mysql实现
+        # sqlalchemy没有literal和escape, 暂不借鉴mysql实现
         try:
             if args is None:
                 return query
@@ -604,7 +604,7 @@ class SqlClient(BaseSqlClient):
                                    tablib.Dataset, Generator],
                              Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], RecordCollection,
                                          tablib.Dataset, Generator], sqlalchemy.engine.ResultProxy]]:
-        # sqlalchemy以直接execute执行存储过程；增加origin_result, dataset参数
+        # sqlalchemy以直接execute执行存储过程; 增加origin_result, dataset参数
         # 执行存储过程
         # name: 存储过程名
         # args: 存储过程参数(可以为None)

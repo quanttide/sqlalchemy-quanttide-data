@@ -18,8 +18,8 @@ class SqlClient(BaseSqlClient):
                  escape_formatter: str = '"{}"', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
                  to_paramstyle: Optional[Paramstyle] = Paramstyle.numeric, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
-        # oracle如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
-        # oracle无replace语句；insert必须带into
+        # oracle如果用双引号escape字段则区分大小写, 故默认escape_auto_format=False
+        # oracle无replace语句; insert必须带into
         # 若database为空则host视为tnsname
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
@@ -54,7 +54,7 @@ class SqlClient(BaseSqlClient):
             cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         if not many:
             cursor.execute(query, () if args is None else args)
-        else:  # executemany: 一句插入多条记录，当语句超出1024000字符时拆分成多个语句；传单条记录需用列表包起来
+        else:  # executemany: 一句插入多条记录, 当语句超出1024000字符时拆分成多个语句; 传单条记录需用列表包起来
             cursor.executemany(query, args)
         if commit and not self._autocommit:
             self.commit()
@@ -69,7 +69,7 @@ class SqlClient(BaseSqlClient):
         return result
 
     def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
-        # cx_Oracle.Connection没有literal和escape，暂不借鉴mysql实现
+        # cx_Oracle.Connection没有literal和escape, 暂不借鉴mysql实现
         try:
             if args is None:
                 return query
@@ -96,7 +96,7 @@ class SqlClient(BaseSqlClient):
         # cx_Oracle.Cursor.callproc支持kwargs
         # 执行存储过程
         # name: 存储过程名
-        # args: 存储过程参数(不能为None，要可迭代)
+        # args: 存储过程参数(不能为None, 要可迭代)
         # fetchall=False: return成功执行数(1)
         # keep_cursor: 返回(result, cursor), 并且不自动关闭cursor
         if kwargs is None:
@@ -163,10 +163,10 @@ class SqlClient(BaseSqlClient):
                                    cx_Oracle.Cursor]]:
         # 执行函数
         # name: 函数名
-        # return_type: 返回值的类型(必填)，参见：
+        # return_type: 返回值的类型(必填), 参见：
         #              https://cx-oracle.readthedocs.io/en/latest/user_guide/plsql_execution.html#plsqlfunc
         #              https://cx-oracle.readthedocs.io/en/latest/api_manual/cursor.html#Cursor.callfunc
-        # args: 函数参数(不能为None，要可迭代)
+        # args: 函数参数(不能为None, 要可迭代)
         # fetchall=False: return成功执行数(1)
         # keep_cursor: 返回(result, cursor), 并且不自动关闭cursor
         if kwargs is None:

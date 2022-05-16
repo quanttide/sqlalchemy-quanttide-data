@@ -19,8 +19,8 @@ class SqlClient(BaseSqlClient):
                  escape_formatter: str = '"{}"', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
                  to_paramstyle: Optional[Paramstyle] = Paramstyle.format, try_times_connect: Union[int, float] = 3,
                  time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
-        # postgresql如果用双引号escape字段则区分大小写，故默认escape_auto_format=False
-        # postgresql无replace语句；insert必须带into
+        # postgresql如果用双引号escape字段则区分大小写, 故默认escape_auto_format=False
+        # postgresql无replace语句; insert必须带into
         super().__init__(host, port, user, password, database, charset, autocommit, connect_now, log, table,
                          statement_save_data, dictionary, escape_auto_format, escape_formatter, empty_string_to_none,
                          args_to_dict, to_paramstyle, try_times_connect, time_sleep_connect, raise_error)
@@ -53,7 +53,7 @@ class SqlClient(BaseSqlClient):
                     ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
                                Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
                                      psycopg2.extensions.cursor]]:
-        # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
+        # psycopg2.connection没有literal和escape, 但psycopg2.cursor有mogrify
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
         if try_times_connect is None:
             try_times_connect = self.try_times_connect
@@ -108,7 +108,7 @@ class SqlClient(BaseSqlClient):
         self.set_connection()
 
     def format(self, query: str, args: Any, raise_error: Optional[bool] = None, cursor: Any = None) -> str:
-        # psycopg2.connection没有literal和escape，但psycopg2.cursor有mogrify
+        # psycopg2.connection没有literal和escape, 但psycopg2.cursor有mogrify
         try:
             if args is None:
                 return query
