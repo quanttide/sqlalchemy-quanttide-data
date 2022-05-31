@@ -100,6 +100,12 @@ class SqlClient(object):
         if connect_now:
             self.try_connect()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def query(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
               chunksize: Optional[int] = None, not_one_by_one: bool = True, auto_format: bool = False,
               keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
