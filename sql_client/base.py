@@ -6,7 +6,8 @@ import contextlib
 import enum
 import re
 import itertools
-from typing import Any, Union, Optional, Tuple, Iterable, Collection, Sequence, Generator
+import functools
+from typing import Any, Union, Optional, Tuple, Iterable, Collection, Callable, Sequence, Generator
 
 
 class Notset:
@@ -58,8 +59,9 @@ class SqlClient(object):
                  autocommit: bool = True, connect_now: bool = True, log: bool = True, table: Optional[str] = None,
                  statement_save_data: str = 'INSERT INTO', dictionary: bool = False, escape_auto_format: bool = False,
                  escape_formatter: str = '{}', empty_string_to_none: bool = True, args_to_dict: Optional[bool] = None,
-                 to_paramstyle: Optional[Paramstyle] = Paramstyle.format, try_times_connect: Union[int, float] = 3,
-                 time_sleep_connect: Union[int, float] = 3, raise_error: bool = False):
+                 to_paramstyle: Optional[Paramstyle] = Paramstyle.format, try_reconnect: bool = True,
+                 try_times_connect: Union[int, float] = 3, time_sleep_connect: Union[int, float] = 3,
+                 raise_error: bool = False, exc_info: Optional[bool] = None):
         if host is None:
             host = os.environ.get('DB_HOST')
         if port is None:
@@ -82,6 +84,10 @@ class SqlClient(object):
         self.charset = charset
         self._autocommit = autocommit
         self.temp_autocommit = None
+        self.log = log
+        if log:
+            import logging
+            self.logger = logging.getLogger(__name__)
         self.table = table
         self.statement_save_data = statement_save_data
         self.dictionary = dictionary
@@ -90,13 +96,13 @@ class SqlClient(object):
         self.empty_string_to_none = empty_string_to_none
         self.args_to_dict = args_to_dict
         self.to_paramstyle = to_paramstyle
+        self.try_reconnect = try_reconnect
         self.try_times_connect = try_times_connect
         self.time_sleep_connect = time_sleep_connect
         self.raise_error = raise_error
-        self.log = log
-        if log:
-            import logging
-            self.logger = logging.getLogger(__name__)
+        self.exc_info = exc_info
+        self.connected = False
+        self.connection = None
         if connect_now:
             self.try_connect()
 
@@ -113,7 +119,8 @@ class SqlClient(object):
               empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, Notset, None] = NOTSET,
               to_paramstyle: Union[Paramstyle, Notset, None] = NOTSET, keep_cursor: Optional[bool] = False,
               cursor: Any = None, try_times_connect: Union[int, float, None] = None,
-              time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+              time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+              exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None
               ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
                          Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator], Any]]:
         # args 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
@@ -125,11 +132,13 @@ class SqlClient(object):
         #              如果args为多条记录且not_one_by_one=False且设置了chunksize且fetchall=True(仅此情况会使用多个cursor), 则只会保留最后一个cursor
         if cursor is not None:
             self.set_connection()
+        if call is None:
+            call = functools.partial(self.try_execute, call=None)
         if args and not hasattr(args, '__getitem__') and hasattr(args, '__iter__'):  # set, Generator, range
             args = tuple(args)
         if not args and args not in (0, ''):
-            return self.try_execute(query, args, fetchall, dictionary, chunksize, False, commit, keep_cursor, cursor,
-                                    try_times_connect, time_sleep_connect, raise_error)
+            return call(query, args, fetchall, dictionary, chunksize, False, commit, keep_cursor, cursor,
+                        try_times_connect, time_sleep_connect, raise_error, exc_info)
         if escape_auto_format is None:
             escape_auto_format = self.escape_auto_format
         if auto_format:
@@ -173,8 +182,8 @@ class SqlClient(object):
                     query = query.format('({})'.format(','.join(map(escape_formatter.format, keys)
                                                                 if escape_auto_format else keys)),
                                          ','.join(self.paramstyle_formatter(keys, to_paramstyle)))
-            return self.try_execute(query, args, fetchall, dictionary, chunksize, is_multiple, commit, keep_cursor,
-                                    cursor, try_times_connect, time_sleep_connect, raise_error)
+            return call(query, args, fetchall, dictionary, chunksize, is_multiple, commit, keep_cursor, cursor,
+                        try_times_connect, time_sleep_connect, raise_error, exc_info)
         # 依次执行
         ori_query = query
         result = [] if fetchall else 0
@@ -192,8 +201,8 @@ class SqlClient(object):
                                                                     str, arg)))
                                          if isinstance(arg, dict) and not is_key_generated else '',
                                          ','.join(self.paramstyle_formatter(arg, to_paramstyle)))
-            temp_result = self.try_execute(query, arg, fetchall, dictionary, chunksize, not_one_by_one, commit,
-                                           keep_cursor, cursor, try_times_connect, time_sleep_connect, raise_error)
+            temp_result = call(query, arg, fetchall, dictionary, chunksize, not_one_by_one, commit, keep_cursor, cursor,
+                               try_times_connect, time_sleep_connect, raise_error, exc_info)
             if keep_cursor:
                 if (chunksize is None or not fetchall) and cursor is not None:
                     cursor.close()
@@ -204,7 +213,7 @@ class SqlClient(object):
                 result += temp_result
         if keep_cursor:
             return result, cursor
-        if chunksize is None or not fetchall:
+        if cursor is not None:
             cursor.close()
         return result
 
@@ -213,8 +222,8 @@ class SqlClient(object):
                   keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
                   escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
                   empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
-                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
-                  ) -> Union[int, tuple, list]:
+                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                  exc_info: Union[bool, Notset, None] = NOTSET) -> Union[int, tuple, list]:
         # data_list 支持单条记录: list/tuple/dict, 或多条记录: list/tuple/set[list/tuple/dict]
         # 首条记录需为dict(one_by_one=True时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录(有log)
@@ -225,8 +234,8 @@ class SqlClient(object):
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
             ' {}'.format(extra) if extra is not None else '')
         return self.query(query, args, False, False, None, not_one_by_one, True, keys, commit, escape_auto_format,
-                          escape_formatter, empty_string_to_none, False, NOTSET, try_times_connect, time_sleep_connect,
-                          raise_error)
+                          escape_formatter, empty_string_to_none, False, NOTSET, False, None, try_times_connect,
+                          time_sleep_connect, raise_error, exc_info, None)
 
     def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
                       key_fields: Union[str, Iterable[str]] = 'id', extra_fields: Union[str, Iterable[str], None] = '',
@@ -240,7 +249,8 @@ class SqlClient(object):
                       select_where: Optional[str] = None, select_extra: str = '', set_extra: Optional[str] = '',
                       update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                       empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
-                      time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+                      time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                      exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None
                       ) -> Union[int, tuple, list]:
         # key_fields: update一句where部分使用
         # extra_fields: 不在update一句使用, return结果包含key_fields和extra_fields
@@ -322,12 +332,13 @@ class SqlClient(object):
         query = 'select {}{} from {}{}{}{}{}'.format(key_fields, ',' + extra_fields if extra_fields else '', table,
                                                      select_where, select_extra, ' limit {}'.format(num) if num else '',
                                                      ' for update' if lock else '')
-        self.begin()
+        transaction = self.begin()
         result = self.query(query, args, fetchall=True, dictionary=dictionary, commit=False,
                             empty_string_to_none=empty_string_to_none, try_times_connect=try_times_connect,
-                            time_sleep_connect=time_sleep_connect, raise_error=raise_error)
+                            time_sleep_connect=time_sleep_connect, raise_error=raise_error, exc_info=exc_info,
+                            call=call)
         if not result:
-            self.commit()
+            self.commit(transaction)
             if autocommit_after is not None:
                 self.autocommit = autocommit_after
             return result
@@ -373,12 +384,12 @@ class SqlClient(object):
                                                      update_where, update_extra)
         is_success = self.query(query, args, fetchall=False, commit=False, empty_string_to_none=empty_string_to_none,
                                 try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
-                                raise_error=raise_error)
+                                raise_error=raise_error, exc_info=exc_info, call=call)
         if is_success:
-            self.commit()
+            self.commit(transaction)
         else:
             result = ()
-            self.rollback()
+            self.rollback(transaction)
         if autocommit_after is not None:
             self.autocommit = autocommit_after
         return result
@@ -390,7 +401,8 @@ class SqlClient(object):
                 next_time: Union[int, float, str, None] = '=0', commit: bool = True, set_extra: Optional[str] = '',
                 update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                 empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
-                time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
+                time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None) -> int:
         # key_fields为''或None时, result需为dict或list[dict], key_fields取result的keys
         # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
         # update_where: 不为None则替换update一句的where部分
@@ -453,7 +465,7 @@ class SqlClient(object):
                                                      update_where, update_extra)
         return self.query(query, args, fetchall=False, commit=commit, empty_string_to_none=empty_string_to_none,
                           try_times_connect=try_times_connect, time_sleep_connect=time_sleep_connect,
-                          raise_error=raise_error)
+                          raise_error=raise_error, exc_info=exc_info, call=call)
 
     def fail_try(self, result: Optional[Iterable], table: Optional[str] = None,
                  key_fields: Union[str, Iterable[str], None] = None, tried_field: Optional[str] = None,
@@ -462,11 +474,12 @@ class SqlClient(object):
                  next_time: Union[int, float, str, None] = 300, commit: bool = True, set_extra: Optional[str] = '',
                  update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                  empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
-                 time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
+                 time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                 exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None) -> int:
         # 复用end_try, 仅改变tried, finished, next_time参数默认值
         return self.end_try(result, table, key_fields, tried_field, tried, finished_field, finished, next_time_field,
                             next_time, commit, set_extra, update_set, update_where, update_extra, empty_string_to_none,
-                            try_times_connect, time_sleep_connect, raise_error)
+                            try_times_connect, time_sleep_connect, raise_error, exc_info, call)
 
     def cancel_try(self, result: Optional[Iterable], table: Optional[str] = None,
                    key_fields: Union[str, Iterable[str], None] = None, tried_field: Optional[str] = None,
@@ -475,15 +488,17 @@ class SqlClient(object):
                    next_time: Union[int, float, str, None] = '=0', commit: bool = True, set_extra: Optional[str] = '',
                    update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                    empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
-                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
+                   time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                   exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None) -> int:
         # 取消尝试, 恢复select_to_try以前的原状
         # 复用end_try, 仅改变tried参数默认值
         # finished_field, next_time_field建议不填写, 以保持原状
         return self.end_try(result, table, key_fields, tried_field, tried, finished_field, finished, next_time_field,
                             next_time, commit, set_extra, update_set, update_where, update_extra, empty_string_to_none,
-                            try_times_connect, time_sleep_connect, raise_error)
+                            try_times_connect, time_sleep_connect, raise_error, exc_info, call)
 
     def close(self, try_close: bool = True) -> None:
+        self.connected = False
         if try_close:
             try:
                 self.connection.close()
@@ -499,19 +514,20 @@ class SqlClient(object):
 
     @autocommit.setter
     def autocommit(self, value: bool):
-        if hasattr(self, 'connection') and value != self._autocommit:
+        if self.connection is not None and value != self._autocommit:
             self.connection.autocommit(value)
         self._autocommit = value
 
     @contextlib.contextmanager
     def transaction(self):
-        # return: self
-        self.begin()
+        # yield: None or transaction
+        transaction = self.begin()
         try:
-            yield self
-            self.commit()
-        except Exception:
-            self.rollback()
+            yield transaction
+            self.commit(transaction)
+        except Exception as e:
+            self.rollback(transaction)
+            raise e
 
     def begin(self) -> None:
         self.temp_autocommit = self._autocommit
@@ -519,14 +535,14 @@ class SqlClient(object):
         self.set_connection()
         self.connection.begin()
 
-    def commit(self) -> None:
+    def commit(self, transaction=None) -> None:
         self.connection.commit()
         if self.temp_autocommit is not None:
             self.autocommit = self.temp_autocommit
             self.temp_autocommit = None
 
-    def rollback(self) -> None:
-        if hasattr(self, 'connection'):
+    def rollback(self, transaction=None) -> None:
+        if self.connection is not None:
             self.connection.rollback()
         if self.temp_autocommit is not None:
             self.autocommit = self.temp_autocommit
@@ -535,41 +551,56 @@ class SqlClient(object):
     def connect(self) -> None:
         self.connection = self.lib.connect(host=self.host, port=self.port, user=self.user, password=self.password,
                                            database=self.database, charset=self.charset, autocommit=self._autocommit)
+        self.connected = True
+
+    def reconnect(self, exc_info: Union[bool, Notset, None] = NOTSET) -> None:
+        self.connect()
 
     def set_connection(self) -> None:
-        if not hasattr(self, 'connection'):
+        if not self.connected or self.connection is None:
             self.try_connect()
 
-    def try_connect(self, try_times_connect: Union[int, float, None] = None,
-                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> None:
+    def try_connect(self, try_reconnect: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
+                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                    exc_info: Union[bool, Notset, None] = NOTSET) -> None:
+        if try_reconnect is None:
+            try_reconnect = self.try_reconnect
         if try_times_connect is None:
             try_times_connect = self.try_times_connect
         if time_sleep_connect is None:
             time_sleep_connect = self.time_sleep_connect
         if raise_error is None:
             raise_error = self.raise_error
+        if exc_info is NOTSET:
+            exc_info = self.exc_info
         try_count_connect = 0
         while True:
             try:
-                self.connect()
+                if try_reconnect:
+                    self.reconnect()
+                else:
+                    self.connect()
                 return
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
                 try_count_connect += 1
                 if try_times_connect and try_count_connect >= try_times_connect:
                     if self.log:
                         self.logger.error('{}(max retry({})): {}  (in try_connect)'.format(
-                            str(type(e))[8:-2], try_count_connect, e), exc_info=True)
+                            str(type(e))[8:-2], try_count_connect, e),
+                            exc_info=not raise_error if exc_info is None else exc_info)
                     if raise_error:
                         raise e
                     return
                 if self.log:
                     self.logger.error('{}(retry({}), sleep {}): {}  (in try_connect)'.format(
-                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e), exc_info=True)
+                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e),
+                        exc_info=True if exc_info is None else exc_info)
                 if time_sleep_connect:
                     time.sleep(time_sleep_connect)
             except Exception as e:
                 if self.log:
-                    self.logger.error('{}: {}  (in try_connect)'.format(str(type(e))[8:-2], e), exc_info=True)
+                    self.logger.error('{}: {}  (in try_connect)'.format(str(type(e))[8:-2], e),
+                                      exc_info=not raise_error if exc_info is None else exc_info)
                 if raise_error:
                     raise e
                 return
@@ -578,7 +609,8 @@ class SqlClient(object):
                     chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None,
                     keep_cursor: Optional[bool] = False, cursor: Any = None,
                     try_times_connect: Union[int, float, None] = None,
-                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None
+                    time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                    exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None
                     ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
                                Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator], Any]]:
         # fetchall=False: return成功执行语句数(executemany模式按数据条数)
@@ -588,14 +620,19 @@ class SqlClient(object):
             time_sleep_connect = self.time_sleep_connect
         if raise_error is None:
             raise_error = self.raise_error
+        if exc_info is NOTSET:
+            exc_info = self.exc_info
+        if call is None:
+            call = self.execute
         ori_cursor = cursor
         if cursor is None:
             cursor = self._before_query_and_get_cursor(fetchall, dictionary)
         try_count_connect = 0
         while True:
             try:
-                result = self.execute(query, args, fetchall, dictionary, chunksize, many, commit, keep_cursor, cursor)
-                if ori_cursor is None and (chunksize is None or not fetchall) and not keep_cursor:
+                result = call(query, args, fetchall, dictionary, chunksize, many, commit, keep_cursor, cursor)
+                if ori_cursor is None and (
+                        chunksize is None or not fetchall) and cursor is not None and not keep_cursor:
                     cursor.close()
                 return result
             except (self.lib.InterfaceError, self.lib.OperationalError) as e:
@@ -603,25 +640,27 @@ class SqlClient(object):
                 if try_times_connect and try_count_connect >= try_times_connect:
                     if self.log:
                         self.logger.error('{}(max retry({})): {}  {}'.format(
-                            str(type(e))[8:-2], try_count_connect, e, self._query_log_text(query, args)), exc_info=True)
+                            str(type(e))[8:-2], try_count_connect, e, self._query_log_text(query, args, cursor)),
+                            exc_info=not raise_error if exc_info is None else exc_info)
                     if raise_error:
-                        if ori_cursor is None:
+                        if ori_cursor is None and cursor is not None:
                             cursor.close()
                         raise e
                     break
                 if self.log:
                     self.logger.error('{}(retry({}), sleep {}): {}  {}'.format(
                         str(type(e))[8:-2], try_count_connect, time_sleep_connect, e,
-                        self._query_log_text(query, args)), exc_info=True)
+                        self._query_log_text(query, args, cursor)), exc_info=True if exc_info is None else exc_info)
                 if time_sleep_connect:
                     time.sleep(time_sleep_connect)
             except Exception as e:
                 self.rollback()
                 if self.log:
                     self.logger.error('{}: {}  {}'.format(
-                        str(type(e))[8:-2], e, self._query_log_text(query, args)), exc_info=True)
+                        str(type(e))[8:-2], e, self._query_log_text(query, args, cursor)),
+                        exc_info=not raise_error if exc_info is None else exc_info)
                 if raise_error:
-                    if ori_cursor is None:
+                    if ori_cursor is None and cursor is not None:
                         cursor.close()
                     raise e
                 break
@@ -663,6 +702,7 @@ class SqlClient(object):
             yield result
 
     def ping(self) -> None:
+        self.set_connection()
         try:
             self.connection.ping()
         except (self.lib.InterfaceError, self.lib.OperationalError):
@@ -835,7 +875,7 @@ class SqlClient(object):
             return ('?',) * len(arg)
         raise ValueError(paramstyle)
 
-    def format(self, query: str, args: Any, raise_error: Optional[bool] = None) -> str:
+    def format(self, query: str, args: Any, raise_error: Optional[bool] = None, cursor: Any = None) -> str:
         try:
             if args is None:
                 return query
@@ -857,9 +897,9 @@ class SqlClient(object):
         self.set_connection()
         return self.connection.cursor(cursor_class)
 
-    def _query_log_text(self, query: str, args: Any) -> str:
+    def _query_log_text(self, query: str, args: Any, cursor: Any = None) -> str:
         try:
-            return 'formatted_query: {}'.format(self.format(query, args, True))
+            return 'formatted_query: {}'.format(self.format(query, args, True, cursor))
         except Exception as e:
             return 'query: {}  args: {}  {}: {}'.format(query, args, str(type(e))[8:-2], e)
 
@@ -880,11 +920,35 @@ class SqlClient(object):
                           escape_auto_format, escape_formatter, empty_string_to_none, args_to_dict, to_paramstyle,
                           keep_cursor, cursor, try_times_connect, time_sleep_connect, raise_error)
 
+    def _callproc(self, query: str, args: Any = None, fetchall: bool = True, dictionary: Optional[bool] = None,
+                  chunksize: Optional[int] = None, many: bool = False, commit: Optional[bool] = None,
+                  keep_cursor: Optional[bool] = False, cursor: Any = None
+                  ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
+                             Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator], Any]]:
+        # fetchall=False: return成功执行语句数(executemany模式按数据条数)
+        ori_cursor = cursor
+        if cursor is None:
+            cursor = self._before_query_and_get_cursor(fetchall, dictionary)
+        cursor.callproc(query, args)
+        if commit and not self._autocommit:
+            self.commit()
+        result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize, keep_cursor)
+                  ) if fetchall else len(args) if many and hasattr(args, '__len__') else 1
+        if keep_cursor:
+            return result, cursor
+        if ori_cursor is None and (chunksize is None or not fetchall):
+            cursor.close()
+        return result
+
     def call_proc(self, name: str, args: Iterable = (), fetchall: bool = True, dictionary: Optional[bool] = None,
-                  chunksize: Optional[int] = None, commit: Optional[bool] = None,
-                  empty_string_to_none: Optional[bool] = None, keep_cursor: Optional[bool] = False, cursor: Any = None,
-                  try_times_connect: Union[int, float, None] = None, time_sleep_connect: Union[int, float, None] = None,
-                  raise_error: Optional[bool] = None
+                  chunksize: Optional[int] = None, not_one_by_one: bool = True, auto_format: bool = False,
+                  keys: Union[str, Collection[str], None] = None, commit: Optional[bool] = None,
+                  escape_auto_format: Optional[bool] = None, escape_formatter: Optional[str] = None,
+                  empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, Notset, None] = NOTSET,
+                  to_paramstyle: Union[Paramstyle, Notset, None] = NOTSET, keep_cursor: Optional[bool] = False,
+                  cursor: Any = None, try_times_connect: Union[int, float, None] = None,
+                  time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None,
+                  exc_info: Union[bool, Notset, None] = NOTSET, call: Optional[Callable] = None
                   ) -> Union[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator],
                              Tuple[Union[int, list, tuple, Tuple[Union[tuple, list, dict, Any]], Generator], Any]]:
         # 执行存储过程
@@ -892,53 +956,8 @@ class SqlClient(object):
         # args: 存储过程参数(不能为None, 要可迭代)
         # fetchall=False: return成功执行数(1)
         # keep_cursor: 返回(result, cursor), 并且不自动关闭cursor
-        if try_times_connect is None:
-            try_times_connect = self.try_times_connect
-        if time_sleep_connect is None:
-            time_sleep_connect = self.time_sleep_connect
-        if raise_error is None:
-            raise_error = self.raise_error
-        if args and (self.empty_string_to_none if empty_string_to_none is None else empty_string_to_none):
-            args = tuple(each if each != '' else None for each in args)
-        if cursor is None:
-            cursor = self._before_query_and_get_cursor(fetchall, dictionary)
-        try_count_connect = 0
-        while True:
-            try:
-                cursor.callproc(name, args)
-                if commit and not self._autocommit:
-                    self.commit()
-                result = (cursor.fetchall() if chunksize is None else self._fetchmany_generator(cursor, chunksize)
-                          ) if fetchall else 1
-                if keep_cursor:
-                    return result, cursor
-                if chunksize is None or not fetchall:
-                    cursor.close()
-                return result
-            except (self.lib.InterfaceError, self.lib.OperationalError) as e:
-                try_count_connect += 1
-                if try_times_connect and try_count_connect >= try_times_connect:
-                    if self.log:
-                        self.logger.error('{}(max retry({})): {}  proc: {}  args: {}'.format(
-                            str(type(e))[8:-2], try_count_connect, e, name, args), exc_info=True)
-                    if raise_error:
-                        cursor.close()
-                        raise e
-                    break
-                if self.log:
-                    self.logger.error('{}(retry({}), sleep {}): {}  proc: {}  args: {}'.format(
-                        str(type(e))[8:-2], try_count_connect, time_sleep_connect, e, name, args), exc_info=True)
-                if time_sleep_connect:
-                    time.sleep(time_sleep_connect)
-            except Exception as e:
-                self.rollback()
-                if self.log:
-                    self.logger.error('{}: {}  proc: {}  args: {}'.format(str(type(e))[8:-2], e, name, args),
-                                      exc_info=True)
-                if raise_error:
-                    cursor.close()
-                    raise e
-                break
-        if fetchall:
-            return ()
-        return 0
+        if call is None:
+            call = functools.partial(self.try_execute, call=self._callproc)
+        return self.query(name, args, fetchall, dictionary, chunksize, not_one_by_one, auto_format, keys, commit,
+                          escape_auto_format, escape_formatter, empty_string_to_none, args_to_dict, to_paramstyle,
+                          keep_cursor, cursor, try_times_connect, time_sleep_connect, raise_error, exc_info, call)

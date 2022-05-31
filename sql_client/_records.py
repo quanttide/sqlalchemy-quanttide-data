@@ -1,6 +1,5 @@
 from collections import OrderedDict
 from inspect import isclass
-from typing import Union
 
 import tablib
 

@@ -99,3 +99,8 @@ class SqlClientTestCase(unittest.TestCase):
         self.assertEqual(1, self.db.save_data((5, 6),
                                               self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?')))
         self._test_query([['5', '6']], 'select * from {}'.format(self.table))
+
+    def test_auto_reconnect(self):
+        self.db.close()
+        self._test_query(1, 'insert into {} values (1,2)'.format(self.table), fetchall=False)
+        self._subtest_query([['1', '2']], 'select * from {}'.format(self.table))
