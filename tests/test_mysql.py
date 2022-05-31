@@ -6,14 +6,15 @@ import sys
 sys.path.append('..')
 
 import sql_client.pymysql
+import sql_client.mysqlclient
 import sql_client.sqlalchemy
 import base_case
 import env
 
 
-class SqlClientPymysqlTestCase(base_case.SqlClientTestCase):
-    env = env.mysql
-    module = sql_client.pymysql
+class SqlClientMysqlclientTestCase(base_case.SqlClientTestCase):
+    account = env.mysql
+    module = sql_client.mysqlclient
 
     def _query_middleware(self, query: str, args=None, query_func=None, **kwargs):
         if query_func is None:
@@ -35,8 +36,27 @@ class SqlClientPymysqlTestCase(base_case.SqlClientTestCase):
         self._test_query([['5', '6']], 'select * from {}'.format(self.table))
 
 
+class SqlClientPymysqlTestCase(SqlClientMysqlclientTestCase):
+    module = sql_client.pymysql
+
+    def test_query(self):
+        # pymysql dictionary=True时返回list而非tuple
+        self._subtest_query([[1]], 'select 1 from dual')
+        self._subtest_query([['2']], 'select %(a)s from dual', {'a': '2'})
+        self._subtest_query([['2']], 'select :a from dual', {'a': '2'})
+        self._subtest_query([[2]], 'select :1 from dual', {'1': 2})
+        self._test_query(1, 'insert into {} values (1,2)'.format(self.table), fetchall=False)
+        self._test_query([], 'insert into {} values (%s,%s)'.format(self.table), ('3', 4))
+        self._test_query(1, 'insert into {} values (:a,:b)'.format(self.table), {'a': '23', 'b': '24'}, fetchall=False)
+        self._subtest_query([['1', '2'], ['3', '4'], ['23', '24']], 'select * from {}'.format(self.table))
+        self._subtest_query([{'a': '1', 'b': '2'}, {'a': '3', 'b': '4'}, {'a': '23', 'b': '24'}],
+                            'select * from {}'.format(self.table), to_result_class=False, dictionary=True)
+        self._subtest_query(1, 'select * from {}'.format(self.table), fetchall=False)
+        self._subtest_query(1, 'select * from {}'.format(self.table), fetchall=False, dictionary=True)
+
+
 class SqlClientSqlalchemyTestCase(base_case.SqlClientTestCase):
-    env = env.mysql
+    account = env.mysql
     module = sql_client.sqlalchemy
     extra_kwargs = {'dialect': 'mysql+pymysql', 'origin_result': True}
     result_class = list
@@ -49,20 +69,28 @@ class SqlClientSqlalchemyTestCase(base_case.SqlClientTestCase):
         # 若版本不对: sqlalchemy.exc.InternalError: (pymysql.err.InternalError) (1193, "Unknown system variable 'transaction_isolation'")
 
 
+class SqlClientMysqlclientPuncTestCase(SqlClientMysqlclientTestCase):
+    account = env.mysql_punc
+
+
 class SqlClientPymysqlPuncTestCase(SqlClientPymysqlTestCase):
-    env = env.mysql_punc
+    account = env.mysql_punc
 
 
 class SqlClientSqlalchemyPuncTestCase(SqlClientSqlalchemyTestCase):
-    env = env.mysql_punc
+    account = env.mysql_punc
+
+
+class SqlClientMysqlclientPuncSpecTestCase(SqlClientMysqlclientTestCase):
+    account = env.mysql_punc_spec
 
 
 class SqlClientPymysqlPuncSpecTestCase(SqlClientPymysqlTestCase):
-    env = env.mysql_punc_spec
+    account = env.mysql_punc_spec
 
 
 class SqlClientSqlalchemyPuncSpecTestCase(SqlClientSqlalchemyTestCase):
-    env = env.mysql_punc_spec
+    account = env.mysql_punc_spec
 
 
 if __name__ == '__main__':
