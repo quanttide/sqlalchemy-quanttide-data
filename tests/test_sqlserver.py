@@ -2,16 +2,17 @@
 
 import unittest
 import sys
+import os
 
-sys.path.append('..')
+sys.path.insert(0, os.path.abspath('..'))
 
 import sql_client.sqlserver
 import sql_client.sqlalchemy
-import base_case
+import tests.base_case
 import env
 
 
-class SqlClientSqlserverTestCase(base_case.SqlClientTestCase):
+class SqlClientSqlserverTestCase(tests.base_case.SqlClientTestCase):
     env = env.sqlserver
     module = sql_client.sqlserver
 
@@ -19,7 +20,7 @@ class SqlClientSqlserverTestCase(base_case.SqlClientTestCase):
         self._test_query([['READ COMMITTED']], 'show transaction isolation level')
 
 
-class SqlClientSqlalchemyTestCase(base_case.SqlClientTestCase):
+class SqlClientSqlalchemyTestCase(tests.base_case.SqlClientTestCase):
     env = env.sqlserver
     module = sql_client.sqlalchemy
     extra_kwargs = {'dialect': 'mssql', 'origin_result': True}

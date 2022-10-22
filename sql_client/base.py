@@ -136,7 +136,7 @@ class SqlClient(object):
             call = functools.partial(self.try_execute, call=None)
         if args and not hasattr(args, '__getitem__') and hasattr(args, '__iter__'):  # set, Generator, range
             args = tuple(args)
-        if not args and args not in (0, ''):
+        if args is None or hasattr(args, '__len__') and not isinstance(args, str) and not args:
             return call(query, args, fetchall, dictionary, chunksize, False, commit, keep_cursor, cursor,
                         try_times_connect, time_sleep_connect, raise_error, exc_info)
         if escape_auto_format is None:
@@ -161,8 +161,8 @@ class SqlClient(object):
             nums = list(map(int, self._pattern[from_paramstyle].findall(query)))
             if nums == sorted(nums):
                 nums = None
-        args, is_multiple, is_key_generated = self.standardize_args(args, None, empty_string_to_none, args_to_dict,
-                                                                    True, keys, nums)
+        args, keys, is_multiple, is_key_generated = self.standardize_args(args, None, empty_string_to_none,
+                                                                          args_to_dict, True, keys, nums)
         if from_paramstyle is None:
             for pattern in self._pattern_esc.values():
                 query = pattern.sub(r'\1', query)
@@ -228,7 +228,7 @@ class SqlClient(object):
         # 首条记录需为dict(one_by_one=True时所有记录均需为dict), 或者含除自增字段外所有字段并按顺序排好各字段值, 或者自行传入keys
         # 默认not_one_by_one=False: 为了部分记录无法插入时能够单独跳过这些记录(有log)
         # fetchall=False: return成功执行语句数(executemany模式即not_one_by_one=True时按数据条数)
-        if not args and args not in (0, ''):
+        if args is None or hasattr(args, '__len__') and not isinstance(args, str) and not args:
             return 0
         query = '{} {}{{}} VALUES({{}}){}'.format(
             self.statement_save_data if statement is None else statement, self.table if table is None else table,
@@ -406,7 +406,7 @@ class SqlClient(object):
         # key_fields为''或None时, result需为dict或list[dict], key_fields取result的keys
         # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
         # update_where: 不为None则替换update一句的where部分
-        result = self.standardize_args(result, True, False, None, False)
+        result, _ = self.standardize_args(result, True, False, None, False)
         if not result:
             return 0
         if table is None:
@@ -720,25 +720,24 @@ class SqlClient(object):
                          empty_string_to_none: Optional[bool] = None, args_to_dict: Union[bool, Notset, None] = NOTSET,
                          get_info: bool = False, keys: Optional[Iterable[str]] = None,
                          nums: Optional[Iterable[int]] = None
-                         ) -> Union[Sequence, dict, None, Tuple[Union[Sequence, dict], bool, bool]]:
-        # get_info=True: 返回值除了标准化的变量以外还有: 是否multiple, 字典key是否为生成的
+                         ) -> Union[Tuple[Union[Sequence, dict, None], Optional[Iterable[str]]],
+                                    Tuple[Union[Sequence, dict, None], Optional[Iterable[str]], bool, bool]]:
+        # get_info=True: 返回值除了args, keys以外还有: 是否multiple, 字典key是否为生成的
         # args_to_dict=None: 不做dict和list之间转换; args_to_dict=False: dict强制转为list; args_to_dict=NOTSET: 读取默认配置
-        # args_to_dict=False且args为dict形式时, keys需不为None(query方法已预先处理)
+        # 仅在args_to_dict=False且args为dict形式且keys为None时, keys会被修改
         # nums: from_paramstyle=Paramstyle.numeric且to_paramstyle为Paramstyle.format或Paramstyle.qmark且通配符乱序时, 传入通配符数字列表
         if args is None:
-            return None if not get_info else (None, False, False)
-        if not args and args not in (0, ''):
-            return () if not get_info else ((), False, False)
+            return (None, keys) if not get_info else (None, keys, False, False)
         if not hasattr(args, '__getitem__'):
             if hasattr(args, '__iter__'):  # set, Generator, range
                 args = tuple(args)
-                if not args:
-                    return args if not get_info else (args, False, False)
             else:  # int, etc.
                 args = (args,)
         elif isinstance(args, str):
             args = (args,)
         # else: dict, list, tuple, dataset/row, recordcollection/record
+        if not args:
+            return (args, keys) if not get_info else (args, keys, False, False)
         if to_multiple is None:  # 检测是否multiple
             to_multiple = not isinstance(args, dict) and not isinstance(args[0], str) and (
                     hasattr(args[0], '__getitem__') or hasattr(args[0], '__iter__'))
@@ -750,6 +749,8 @@ class SqlClient(object):
         if not to_multiple:
             if isinstance(args, dict):
                 if args_to_dict is False:
+                    if keys is None:
+                        keys = tuple(args)
                     args = tuple(args[key] if args[key] != '' else None for key in keys
                                  ) if empty_string_to_none else tuple(map(args.__getitem__, keys))
                 elif empty_string_to_none:
@@ -757,10 +758,12 @@ class SqlClient(object):
             else:
                 if args_to_dict:
                     if keys is None:
-                        keys = tuple(map(str, range(1, len(args) + 1)))
+                        to_dict_keys = tuple(map(str, range(1, len(args) + 1)))
                         is_key_generated = True
-                    args = {key: value if value != '' else None for key, value in zip(keys, args)
-                            } if empty_string_to_none else dict(zip(keys, args))
+                    else:
+                        to_dict_keys = keys
+                    args = {key: value if value != '' else None for key, value in zip(to_dict_keys, args)
+                            } if empty_string_to_none else dict(zip(to_dict_keys, args))
                 elif nums is not None:
                     args = tuple(args[num] if args[num] != '' else None for num in nums
                                  ) if empty_string_to_none else tuple(map(args.__getitem__, nums))
@@ -769,6 +772,8 @@ class SqlClient(object):
         else:
             if isinstance(args, dict):
                 if args_to_dict is False:
+                    if keys is None:
+                        keys = tuple(args)
                     args = (tuple(args[key] if args[key] != '' else None for key in keys),
                             ) if empty_string_to_none else (tuple(map(args.__getitem__, keys)),)
                 else:
@@ -776,6 +781,8 @@ class SqlClient(object):
                             ) if empty_string_to_none else (args,)
             elif isinstance(args[0], dict):
                 if args_to_dict is False:
+                    if keys is None:
+                        keys = tuple(args[0])
                     args = tuple(tuple(each[key] if each[key] != '' else None for key in keys) for each in args
                                  ) if empty_string_to_none else tuple(
                         tuple(map(each.__getitem__, keys)) for each in args)
@@ -784,23 +791,26 @@ class SqlClient(object):
             else:
                 if args_to_dict:
                     if keys is None:
-                        keys = tuple(map(str, range(1, len(args) + 1)))
+                        to_dict_keys = tuple(map(str, range(1, len(args) + 1)))
                         is_key_generated = True
+                    else:
+                        to_dict_keys = keys
                     if isinstance(args[0], str):
-                        args = ({key: value if value != '' else None for key, value in zip(keys, args)},
-                                ) if empty_string_to_none else (dict(zip(keys, args)),)
+                        args = ({key: value if value != '' else None for key, value in zip(to_dict_keys, args)},
+                                ) if empty_string_to_none else (dict(zip(to_dict_keys, args)),)
                     elif not hasattr(args[0], '__getitem__'):
                         if hasattr(args[0], '__iter__'):  # list[set, Generator, range]
                             # mysqlclient, pymysql均只支持dict, list, tuple, 不支持set, Generator等
-                            args = tuple({key: value if value != '' else None for key, value in zip(keys, each)}
+                            args = tuple({key: value if value != '' else None for key, value in zip(to_dict_keys, each)}
                                          for each in args) if empty_string_to_none else tuple(
-                                dict(zip(keys, each)) for each in args)
+                                dict(zip(to_dict_keys, each)) for each in args)
                         else:  # list[int, etc.]
-                            args = ({key: value if value != '' else None for key, value in zip(keys, args)},
-                                    ) if empty_string_to_none else (dict(zip(keys, args)),)
+                            args = ({key: value if value != '' else None for key, value in zip(to_dict_keys, args)},
+                                    ) if empty_string_to_none else (dict(zip(to_dict_keys, args)),)
                     else:
-                        args = tuple({key: value if value != '' else None for key, value in zip(keys, each)} for each in
-                                     args) if empty_string_to_none else tuple(dict(zip(keys, each)) for each in args)
+                        args = tuple({key: value if value != '' else None for key, value in zip(to_dict_keys, each)}
+                                     for each in args) if empty_string_to_none else tuple(dict(zip(to_dict_keys, each))
+                                                                                          for each in args)
                 elif nums is not None:
                     if isinstance(args[0], str):
                         args = (tuple(args[num] if args[num] != '' else None for num in nums),
@@ -830,7 +840,7 @@ class SqlClient(object):
                             args,)
                 elif empty_string_to_none:
                     args = tuple(tuple(e if e != '' else None for e in each) for each in args)
-        return args if not get_info else (args, to_multiple, is_key_generated)
+        return (args, keys) if not get_info else (args, keys, to_multiple, is_key_generated)
 
     @classmethod
     def judge_paramstyle(cls, query: str, first: Optional[Paramstyle] = None) -> Optional[Paramstyle]:

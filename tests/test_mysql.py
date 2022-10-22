@@ -2,17 +2,18 @@
 
 import unittest
 import sys
+import os
 
-sys.path.append('..')
+sys.path.insert(0, os.path.abspath('..'))
 
 import sql_client.pymysql
 import sql_client.mysqlclient
 import sql_client.sqlalchemy
-import base_case
+import tests.base_case
 import env
 
 
-class SqlClientMysqlclientTestCase(base_case.SqlClientTestCase):
+class SqlClientMysqlclientTestCase(tests.base_case.SqlClientTestCase):
     account = env.mysql
     module = sql_client.mysqlclient
 
@@ -23,17 +24,23 @@ class SqlClientMysqlclientTestCase(base_case.SqlClientTestCase):
             query = query.replace(self.table, self.table.replace('%', '%%'))
         return query_func(query, args, **kwargs)
 
+    def test_save_data(self):
+        self.assertEqual(1, self.db.save_data((5, 6), self.table.replace('{', '{{').replace('}', '}}').replace(
+            '?', '\?').replace('%', '%%')))
+        self._test_query([['5', '6']], 'select * from {}'.format(self.table))
+        self.assertEqual(2, self.db.save_data([{'a': 11, 'b': 12}, {'a': 9, 'b': 10}], self.table.replace(
+            '{', '{{').replace('}', '}}').replace('?', '\?').replace('%', '%%')))
+        self._test_query([['5', '6'], ['11', '12'], ['9', '10']], 'select * from {}'.format(self.table))
+        self.assertEqual(1, self.db.save_data({'a': 7, 'b': 8}, self.table.replace('{', '{{').replace(
+            '}', '}}').replace('?', '\?').replace('%', '%%')))
+        self._test_query([['5', '6'], ['11', '12'], ['9', '10'], ['7', '8']], 'select * from {}'.format(self.table))
+
     def test_isolation_level(self):
         version = self._query_middleware('SELECT VERSION()')[0][0].split('.')
         version[2] = version[2].split('-')[0]
         self._test_query([['REPEATABLE-READ']], 'SELECT @@transaction_isolation' if tuple(map(int, version)) >= (
             5, 7, 20) else 'SELECT @@tx_isolation')
         # 若版本不对: pymysql.err.InternalError: (1193, "Unknown system variable 'transaction_isolation'")
-
-    def test_save_data(self):
-        self.assertEqual(1, self.db.save_data((5, 6), self.table.replace('{', '{{').replace('}', '}}').replace(
-            '?', '\?').replace('%', '%%')))
-        self._test_query([['5', '6']], 'select * from {}'.format(self.table))
 
 
 class SqlClientPymysqlTestCase(SqlClientMysqlclientTestCase):
@@ -55,7 +62,7 @@ class SqlClientPymysqlTestCase(SqlClientMysqlclientTestCase):
         self._subtest_query(1, 'select * from {}'.format(self.table), fetchall=False, dictionary=True)
 
 
-class SqlClientSqlalchemyTestCase(base_case.SqlClientTestCase):
+class SqlClientSqlalchemyTestCase(tests.base_case.SqlClientTestCase):
     account = env.mysql
     module = sql_client.sqlalchemy
     extra_kwargs = {'dialect': 'mysql+pymysql', 'origin_result': True}

@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import unittest
+import sys
+import os
 from typing import Any
+
+sys.path.insert(0, os.path.abspath('..'))
 
 import sql_client.base
 
@@ -19,9 +23,6 @@ class SqlClientTestCase(unittest.TestCase):
         cls.db = cls.module.SqlClient(try_times_connect=1, raise_error=True, **cls.account, **cls.extra_kwargs)
         cls.db.query('drop table if exists {}'.format(cls.table), fetchall=False)
         cls.db.query('create table {0} (a varchar(255) NULL,b varchar(255) NULL);'.format(cls.table), fetchall=False)
-
-    def setUp(self) -> None:
-        pass
 
     def tearDown(self) -> None:
         self.db.query('delete from {}'.format(self.table), fetchall=False)
@@ -63,6 +64,31 @@ class SqlClientTestCase(unittest.TestCase):
         self._subtest_query(1, 'select * from {}'.format(self.table), fetchall=False)
         self._subtest_query(1, 'select * from {}'.format(self.table), fetchall=False, dictionary=True)
 
+    def test_save_data(self):
+        self.assertEqual(1, self.db.save_data((5, 6),
+                                              self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?')))
+        self._test_query([['5', '6']], 'select * from {}'.format(self.table))
+        self.assertEqual(2, self.db.save_data([{'a': 11, 'b': 12}, {'a': 9, 'b': 10}],
+                                              self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?')))
+        self._test_query([['5', '6'], ['11', '12'], ['9', '10']], 'select * from {}'.format(self.table))
+        self.assertEqual(1, self.db.save_data({'a': 7, 'b': 8},
+                                              self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?')))
+        self._test_query([['5', '6'], ['11', '12'], ['9', '10'], ['7', '8']], 'select * from {}'.format(self.table))
+
+    def test_autocommit(self):
+        new_db = self.module.SqlClient(try_times_connect=1, raise_error=True, **self.account, **self.extra_kwargs)
+        self.db.save_data((13, 14), self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?'))
+        self._test_query([['13', '14']], 'select * from {}'.format(self.table), query_func=new_db.query)
+        self.db.autocommit = False
+        try:
+            self.db.begin()
+            self.db.save_data((15, 16), self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?'))
+            self._test_query([['13', '14']], 'select * from {}'.format(self.table), query_func=new_db.query)
+            new_db.close()
+        finally:
+            self.db.rollback()
+            self.db.autocommit = True
+
     def test_query_isolation(self):
         self.db.autocommit = False
         try:
@@ -92,13 +118,8 @@ class SqlClientTestCase(unittest.TestCase):
             new_db.rollback()
             new_db.close()
         finally:
-            self.db.autocommit = True
             self.db.rollback()
-
-    def test_save_data(self):
-        self.assertEqual(1, self.db.save_data((5, 6),
-                                              self.table.replace('{', '{{').replace('}', '}}').replace('?', '\?')))
-        self._test_query([['5', '6']], 'select * from {}'.format(self.table))
+            self.db.autocommit = True
 
     def test_auto_reconnect(self):
         self.db.close()

@@ -2,16 +2,17 @@
 
 import unittest
 import sys
+import os
 
-sys.path.append('..')
+sys.path.insert(0, os.path.abspath('..'))
 
 import sql_client.oracle
 import sql_client.sqlalchemy
-import base_case
+import tests.base_case
 import env
 
 
-class SqlClientOracleTestCase(base_case.SqlClientTestCase):
+class SqlClientOracleTestCase(tests.base_case.SqlClientTestCase):
     env = env.oracle
     module = sql_client.oracle
 
@@ -34,7 +35,7 @@ class SqlClientOracleTestCase(base_case.SqlClientTestCase):
                             dictionary=True)
 
 
-class SqlClientSqlalchemyTestCase(base_case.SqlClientTestCase):
+class SqlClientSqlalchemyTestCase(tests.base_case.SqlClientTestCase):
     env = env.oracle
     module = sql_client.sqlalchemy
     extra_kwargs = {'dialect': 'oracle', 'origin_result': True}
