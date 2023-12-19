@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-任务调度模块
+`DataDispatcher` domain model
 """
 
 from typing import Optional, Union, Iterable
 
+from .utils import *
 
-class DispatcherMixin(object):
+
+class DataDispatcher:
+    """
+    数据任务分发器
+    """
     def select_to_try(self, table: Optional[str] = None, num: Union[int, str, None] = 1,
                       key_fields: Union[str, Iterable[str]] = 'id', extra_fields: Union[str, Iterable[str], None] = '',
                       tried_field: Optional[str] = None, tried: Union[int, str, tuple, None] = 'between',
@@ -172,63 +177,37 @@ class DispatcherMixin(object):
                 update_set: Optional[str] = None, update_where: Optional[str] = None, update_extra: str = '',
                 empty_string_to_none: Optional[bool] = None, try_times_connect: Union[int, float, None] = None,
                 time_sleep_connect: Union[int, float, None] = None, raise_error: Optional[bool] = None) -> int:
-        # key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
-        # tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
-        # update_where: 不为None则替换update一句的where部分
-        result = self.standardize_args(result, True, False, None, False)
-        if not result:
-            return 0
-        if table is None:
-            table = self.table
-        if not key_fields:
-            key_fields = tuple(result[0].keys())
-        elif isinstance(key_fields, str):
-            key_fields = [key.strip() for key in key_fields.split(',')]
+        """
+        key_fields为''或None时，result需为dict或list[dict]，key_fields取result的keys
+        tried_field, finished_field, next_time_field字段传入与否分别决定相关逻辑启用与否, 默认值None表示不启用
+        update_where: 不为None则替换update一句的where部分
+        """
+        # 标准化参数
+        result = self.standardize_args(result, True, False, None, False) or 0
+        # table参数
+        table = table or self.table
+        # key_fields参数
+        key_fields = get_key_fields(key_fields, result)
         args = []
-        if not tried_field:
-            update_tried = ''
-        elif tried == '-+1':
-            update_tried = '{0}=-{0}+1'.format(tried_field)
-        elif tried == '-':
-            update_tried = '{0}=-{0}'.format(tried_field)
-        elif tried == '+1':
-            update_tried = '{0}={0}+1'.format(tried_field)
-        elif isinstance(tried, str) and tried.lstrip().startswith('='):
-            update_tried = tried_field + tried
-        elif isinstance(tried, int):
-            update_tried = '{}={}'.format(tried_field, tried)
-        else:
-            update_tried = tried_field + '=%s'
+        # update_tried参数
+        update_tried, flag = get_update_tried(tried_field, tried)
+        if flag:
             args.append(tried)
-        if not finished_field:
-            update_finished = ''
-        elif isinstance(finished, str) and finished.lstrip().startswith('='):
-            update_finished = finished_field + finished
-        elif isinstance(finished, int):
-            update_finished = '{}={}'.format(finished_field, finished)
-        else:
-            update_finished = finished_field + '=%s'
+        # `update_finished`参数
+        update_finished, flag2 = get_update_finished(finished_field, finished)
+        if flag2:
             args.append(finished)
-        if not next_time_field:
-            update_next_time = ''
-        elif isinstance(next_time, (int, float)):
-            update_next_time = '{}={}'.format(next_time_field,
-                                              int(time.time()) + next_time if next_time < 10 ** 9 else next_time)
-        elif isinstance(next_time, str) and next_time.lstrip().startswith('='):
-            update_next_time = next_time_field + next_time
-        else:
-            update_next_time = next_time_field + '=%s'
+        # `update_next_time`参数
+        update_next_time, flag3 = get_update_next_time(next_time_field, next_time)
+        if flag3:
             args.append(next_time)
-        if update_where is None:
-            update_where = ' or '.join((' and '.join(map('{}=%s'.format, key_fields)),) * len(result))
-            if isinstance(result[0], dict):
-                args.extend(row[key] for row in result for key in key_fields)
-            else:
-                args.extend(row[i] for row in result for i in range(len(key_fields)))
-        elif update_where.startswith('where'):
-            update_where = update_where[5:].lstrip(' ')
-        elif update_where.startswith(' where'):
-            update_where = update_where[6:].lstrip(' ')
+        # `update_where`参数
+        update_where, flag4 = get_update_where(update_where, key_fields, result)
+        if flag4 == 1:
+            args.extend(row[key] for row in result for key in key_fields)
+        elif flag4 == 2:
+            args.extend(row[i] for row in result for i in range(len(key_fields)))
+        # query
         query = 'update {} set {} where {}{}'.format(table, ','.join(filter(None, (
             update_tried, update_finished, update_next_time))) + set_extra if update_set is None else update_set,
                                                      update_where, update_extra)
